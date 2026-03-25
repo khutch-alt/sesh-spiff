@@ -380,6 +380,7 @@ class BonusProgramCreate(BaseModel):
 class DistributorFundUpdate(BaseModel):
     initial_fund_amount: Optional[float] = None
     add_funds: Optional[float] = None
+    set_balance: Optional[float] = None
     invite_code: Optional[str] = None
 
 class UserCreate(BaseModel):
@@ -879,6 +880,11 @@ def update_distributor_fund(dist_id: str, req: DistributorFundUpdate, user=Depen
         db.execute(
             "UPDATE distributors SET initial_fund_amount = ?, current_fund_balance = current_fund_balance + ?, updated_at = datetime('now') WHERE id = ?",
             (req.initial_fund_amount, diff, dist_id)
+        )
+    if req.set_balance is not None:
+        db.execute(
+            "UPDATE distributors SET current_fund_balance = ?, updated_at = datetime('now') WHERE id = ?",
+            (req.set_balance, dist_id)
         )
     if req.invite_code is not None:
         code = req.invite_code.strip().upper()

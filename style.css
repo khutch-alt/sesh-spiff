@@ -1005,3 +1005,7 @@ select.form-input {
 /* Success button */
 .btn-success { background:var(--success, #16a34a); color:#fff; border-color:var(--success, #16a34a); }
 .btn-success:hover { opacity:0.9; }
+
+/* Fund mode toggle */
+.fund-mode-btn { flex:1; padding:var(--sp-3); font-size:13px; font-weight:500; background:var(--surface-alt); border:1px solid var(--border); border-radius:var(--radius); cursor:pointer; color:var(--text-muted); transition:all .15s; }
+.fund-mode-btn.active { background:var(--sesh-teal); color:#fff; border-color:var(--sesh-teal); }

@@ -585,7 +585,7 @@ async function renderAdminFunds() {
                 <button class="btn btn-secondary btn-xs" onclick="editInviteCode('${d.id}','${esc(d.invite_code || "")}')">Edit</button>
               </div>
             </div>
-            <button class="btn btn-primary btn-sm" onclick="openAddFundsModal('${d.id}','${esc(d.name)}')">Add Funds</button>
+            <button class="btn btn-primary btn-sm" onclick="openAddFundsModal('${d.id}','${esc(d.name)}',${d.current_fund_balance})">Manage Fund</button>
           </div>
           <div class="fund-meter"><div class="fund-meter-bar"><div class="fund-meter-fill" style="width:${Math.round(pct)}%"></div></div></div>
           <div class="dist-fund-stats">
@@ -621,23 +621,48 @@ window.saveInviteCode = async function(distId) {
   } catch (err) { showToast(err.message, "error"); }
 };
 
-window.openAddFundsModal = function(distId, distName) {
+window.openAddFundsModal = function(distId, distName, currentBalance) {
   const modal = document.createElement("div"); modal.className = "modal-overlay";
-  modal.innerHTML = `<div class="modal-card"><h3>Add Funds — ${esc(distName)}</h3>
-    <div class="form-group"><label>Amount ($)</label><input type="number" class="form-input" id="add-funds-amount" min="1" placeholder="1000"></div>
+  modal.innerHTML = `<div class="modal-card"><h3>Manage Fund — ${esc(distName)}</h3>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:var(--sp-5);">Current balance: <strong>${fmtCurrency(currentBalance)}</strong></p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:var(--sp-5);">
+      <button class="fund-mode-btn active" id="mode-set" onclick="setFundMode('set')">Set Balance</button>
+      <button class="fund-mode-btn" id="mode-add" onclick="setFundMode('add')">Add Funds</button>
+    </div>
+    <div id="fund-mode-set">
+      <div class="form-group"><label>New Balance ($)</label><input type="number" class="form-input" id="set-balance-amount" min="0" placeholder="5000"></div>
+      <p style="font-size:11px;color:var(--text-muted);margin-top:-var(--sp-3);">This replaces the current balance entirely.</p>
+    </div>
+    <div id="fund-mode-add" style="display:none">
+      <div class="form-group"><label>Amount to Add ($)</label><input type="number" class="form-input" id="add-funds-amount" min="1" placeholder="1000"></div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-      <button class="btn btn-primary" onclick="submitAddFunds('${distId}')">Add</button>
+      <button class="btn btn-primary" onclick="submitFundUpdate('${distId}')">Save</button>
     </div></div>`;
   document.body.appendChild(modal);
 };
 
-window.submitAddFunds = async function(distId) {
-  const amount = parseFloat(document.getElementById("add-funds-amount")?.value || "0");
+window.setFundMode = function(mode) {
+  document.getElementById("fund-mode-set").style.display = mode === "set" ? "block" : "none";
+  document.getElementById("fund-mode-add").style.display = mode === "add" ? "block" : "none";
+  document.getElementById("mode-set").classList.toggle("active", mode === "set");
+  document.getElementById("mode-add").classList.toggle("active", mode === "add");
+};
+
+window.submitFundUpdate = async function(distId) {
+  const isSet = document.getElementById("fund-mode-set").style.display !== "none";
+  const amount = parseFloat((isSet
+    ? document.getElementById("set-balance-amount")
+    : document.getElementById("add-funds-amount"))?.value || "0");
   document.querySelector(".modal-overlay")?.remove();
-  if (amount <= 0) { showToast("Enter a valid amount.", "error"); return; }
-  try { await api(`/api/distributors/${distId}/fund`, { method: "PUT", body: { add_funds: amount } }); showToast(`${fmtCurrency(amount)} added.`, "success"); renderAdminFunds(); }
-  catch (err) { showToast(err.message, "error"); }
+  if (amount < 0 || (!isSet && amount <= 0)) { showToast("Enter a valid amount.", "error"); return; }
+  try {
+    const body = isSet ? { set_balance: amount } : { add_funds: amount };
+    await api(`/api/distributors/${distId}/fund`, { method: "PUT", body });
+    showToast(isSet ? `Balance set to ${fmtCurrency(amount)}.` : `${fmtCurrency(amount)} added.`, "success");
+    renderAdminFunds();
+  } catch (err) { showToast(err.message, "error"); }
 };
 
 /* ── Admin Settings ─────────────────────────────────────────── */
