@@ -259,7 +259,7 @@ def require_admin(user):
         raise HTTPException(status_code=403, detail="Admin access required")
 
 # ── Payout calculation ──────────────────────────────────────────────
-def calculate_payout(db, claim_type_id: str, distributor_id: str, order_date: str) -> dict:
+def calculate_payout(db, claim_type_id: str, distributor_id: str, order_date: str, rolls_count: int = 0) -> dict:
     ct = db.execute("SELECT * FROM claim_types WHERE id = ?", (claim_type_id,)).fetchone()
     if not ct:
         return {"payout": 0, "bonus_info": None, "error": "Invalid claim type"}
@@ -267,6 +267,9 @@ def calculate_payout(db, claim_type_id: str, distributor_id: str, order_date: st
     payout = ct["base_payout"]
     min_rolls = ct["min_rolls"]
     max_payout = ct["max_payout"]
+    # Per-roll multiplication for REORDER type
+    if ct["name"] == "REORDER" and rolls_count > 0:
+        payout = ct["base_payout"] * rolls_count
 
     override = db.execute(
         "SELECT * FROM distributor_payout_overrides WHERE distributor_id = ? AND claim_type_id = ? AND is_active = 1",
@@ -920,7 +923,7 @@ async def create_claim(
         db.close()
         raise HTTPException(status_code=400, detail="Invalid or inactive claim type")
 
-    payout_info = calculate_payout(db, claim_type_id, user["distributor_id"], order_date)
+    payout_info = calculate_payout(db, claim_type_id, user["distributor_id"], order_date, rolls_count)
     payout = payout_info["payout"]
     min_rolls = payout_info["min_rolls"]
 
