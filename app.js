@@ -859,7 +859,8 @@ window.submitFundUpdate = async function(distId) {
   document.querySelector(".modal-overlay")?.remove();
   if (amount < 0 || (!isSet && amount <= 0)) { showToast("Enter a valid amount.", "error"); return; }
   try {
-    const body = isSet ? { set_balance: amount } : { add_funds: amount };
+    // Set Balance resets initial_fund_amount too, so "paid out" (= initial − current) stays clean
+    const body = isSet ? { set_balance: amount, initial_fund_amount: amount } : { add_funds: amount };
     await api(`/api/distributors/${distId}/fund`, { method: "PUT", body });
     showToast(isSet ? `Balance set to ${fmtCurrency(amount)}.` : `${fmtCurrency(amount)} added.`, "success");
     renderAdminFunds();
