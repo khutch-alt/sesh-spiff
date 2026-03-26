@@ -62,12 +62,12 @@ function celebrateClaim(amount) {
   overlay.style.cssText = `
     position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;
     align-items:center;justify-content:center;pointer-events:none;
-    background:rgba(0,0,0,0.55);animation:fadeInOut 2.2s ease forwards;
+    background:rgba(80,80,80,0.45);animation:fadeInOut 2.2s ease forwards;
   `;
   overlay.innerHTML = `
     <div style="font-size:56px;animation:popIn 0.4s cubic-bezier(.17,.67,.24,1.4) forwards;">🏪</div>
-    <div style="color:#b9f600;font-size:32px;font-weight:700;margin-top:12px;letter-spacing:-0.5px;">+${fmtCurrency(amount)}</div>
-    <div style="color:rgba(255,255,255,0.8);font-size:16px;margin-top:6px;">Claim submitted!</div>
+    <div style="color:#ffffff;font-size:32px;font-weight:700;margin-top:12px;letter-spacing:-0.5px;">+${fmtCurrency(amount)}</div>
+    <div style="color:rgba(255,255,255,0.85);font-size:16px;margin-top:6px;">Claim submitted!</div>
   `;
   document.head.insertAdjacentHTML("beforeend", `<style>
     @keyframes fadeInOut{0%{opacity:0}15%{opacity:1}75%{opacity:1}100%{opacity:0}}
@@ -79,7 +79,7 @@ function celebrateClaim(amount) {
 
 /* ── Helpers ────────────────────────────────────────────────── */
 function seshLogo(size = 32) {
-  return `<svg width="${size}" height="${size}" viewBox="0 0 40 40" fill="none"><rect width="40" height="40" rx="10" fill="#00342B"/><text x="20" y="27" text-anchor="middle" fill="#b9f600" font-family="'Space Grotesk',sans-serif" font-size="20" font-weight="700">S</text></svg>`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 40 40" fill="none"><rect width="40" height="40" rx="10" fill="#111111"/><text x="20" y="27" text-anchor="middle" fill="#ffffff" font-family="'Space Grotesk',sans-serif" font-size="20" font-weight="700">S</text></svg>`;
 }
 function fmtCurrency(n) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n || 0);
