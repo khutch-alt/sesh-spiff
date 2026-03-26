@@ -8,8 +8,25 @@ let state = {
   token: null,
   user: null,
   view: "login",
-  loginTab: "signin", // signin | signup | forgot | reset
+  loginTab: "signin",
+  lbFilter: "all",   // "all" | "my-dist"
+  quickClaim: false,
 };
+
+/* ── US States ──────────────────────────────────────────────── */
+const US_STATES = [
+  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
+  "HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
+  "MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+  "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC",
+  "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"
+];
+function stateSelectHTML(selected = "") {
+  return `<select class="form-input" id="store-state">
+    <option value="">State</option>
+    ${US_STATES.map(s => `<option value="${s}"${s === selected ? " selected" : ""}>${s}</option>`).join("")}
+  </select>`;
+}
 
 /* ── API ────────────────────────────────────────────────────── */
 async function api(path, opts = {}) {
@@ -45,12 +62,12 @@ function celebrateClaim(amount) {
   overlay.style.cssText = `
     position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;
     align-items:center;justify-content:center;pointer-events:none;
-    background:rgba(0,0,0,0.45);animation:fadeInOut 2.2s ease forwards;
+    background:rgba(0,0,0,0.55);animation:fadeInOut 2.2s ease forwards;
   `;
   overlay.innerHTML = `
     <div style="font-size:56px;animation:popIn 0.4s cubic-bezier(.17,.67,.24,1.4) forwards;">🏪</div>
-    <div style="color:#fff;font-size:32px;font-weight:700;margin-top:12px;letter-spacing:-0.5px;">+${fmtCurrency(amount)}</div>
-    <div style="color:rgba(255,255,255,0.75);font-size:16px;margin-top:6px;">Claim submitted!</div>
+    <div style="color:#b9f600;font-size:32px;font-weight:700;margin-top:12px;letter-spacing:-0.5px;">+${fmtCurrency(amount)}</div>
+    <div style="color:rgba(255,255,255,0.8);font-size:16px;margin-top:6px;">Claim submitted!</div>
   `;
   document.head.insertAdjacentHTML("beforeend", `<style>
     @keyframes fadeInOut{0%{opacity:0}15%{opacity:1}75%{opacity:1}100%{opacity:0}}
@@ -62,7 +79,7 @@ function celebrateClaim(amount) {
 
 /* ── Helpers ────────────────────────────────────────────────── */
 function seshLogo(size = 32) {
-  return `<svg width="${size}" height="${size}" viewBox="0 0 40 40" fill="none"><rect width="40" height="40" rx="10" fill="#0f9b8e"/><text x="20" y="27" text-anchor="middle" fill="white" font-family="'General Sans',sans-serif" font-size="20" font-weight="700">S</text></svg>`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 40 40" fill="none"><rect width="40" height="40" rx="10" fill="#00342B"/><text x="20" y="27" text-anchor="middle" fill="#b9f600" font-family="'Space Grotesk',sans-serif" font-size="20" font-weight="700">S</text></svg>`;
 }
 function fmtCurrency(n) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n || 0);
@@ -83,13 +100,84 @@ function streakLabel(n) {
   return `🔥 ${n}-week streak`;
 }
 function motivatorMessage(stats) {
-  const { doors_this_month, claims_this_week, streak_weeks, rank, total_earned } = stats;
+  const { doors_this_month, claims_this_week, streak_weeks, rank } = stats;
   if (claims_this_week === 0) return { emoji: "⚡", msg: "You haven't logged anything this week — get back out there." };
   if (streak_weeks >= 4) return { emoji: "🏆", msg: `${streak_weeks}-week streak. You're on fire — keep it going.` };
   if (rank === 1) return { emoji: "👑", msg: "You're #1 this month. Defend it." };
   if (rank <= 3) return { emoji: "🎯", msg: `You're #${rank} this month. One push and you could take the top spot.` };
   if (doors_this_month === 0) return { emoji: "🚪", msg: "No new doors yet this month. First one's the hardest." };
   return { emoji: "📈", msg: `${doors_this_month} new door${doors_this_month !== 1 ? "s" : ""} this month — keep the streak alive.` };
+}
+
+/* ── Streak Banner (3+ weeks) ───────────────────────────────── */
+function streakBannerHTML(weeks) {
+  if (!weeks || weeks < 3) return "";
+  const msgs = [
+    null, null, null,
+    "3-week streak 🔥 You're building serious momentum.",
+    "4-week streak 🔥🔥 You're on fire. Keep it going!",
+    "5-week streak ⚡🔥 Unstoppable. The leaderboard is watching.",
+  ];
+  const msg = msgs[Math.min(weeks, 5)] || `${weeks}-week streak 🏆 Elite consistency.`;
+  return `<div class="streak-banner">${msg}</div>`;
+}
+
+/* ── Week Comparison ────────────────────────────────────────── */
+function weekCompareHTML(stats) {
+  const thisWeek = stats.doors_this_week ?? stats.claims_this_week ?? 0;
+  const lastWeek = stats.doors_last_week ?? null;
+  if (lastWeek === null) return "";
+  const diff = thisWeek - lastWeek;
+  let arrow = "";
+  if (diff > 0) arrow = `<span class="week-up">▲ ${diff} vs last week</span>`;
+  else if (diff < 0) arrow = `<span class="week-down">▼ ${Math.abs(diff)} vs last week</span>`;
+  else arrow = `<span class="week-neutral">same as last week</span>`;
+  return `<div class="week-compare">This week: <strong>${thisWeek}</strong> door${thisWeek !== 1 ? "s" : ""} &nbsp;${arrow}</div>`;
+}
+
+/* ── Milestone Progress ─────────────────────────────────────── */
+function milestoneHTML(totalEarned) {
+  const earned = totalEarned || 0;
+  const milestone = Math.ceil((earned + 0.01) / 50) * 50;
+  const progress = Math.min(100, ((earned % 50) / 50) * 100);
+  const toNext = milestone - earned;
+  return `
+    <div class="milestone-wrap">
+      <div class="milestone-label">
+        <span>Next milestone: <strong>${fmtCurrency(milestone)}</strong></span>
+        <span class="milestone-to-go">${fmtCurrency(toNext)} to go</span>
+      </div>
+      <div class="fund-meter-bar"><div class="fund-meter-fill" style="width:${progress.toFixed(1)}%"></div></div>
+    </div>`;
+}
+
+/* ── Pull-to-refresh ────────────────────────────────────────── */
+function setupPullToRefresh(el, refreshFn) {
+  let startY = 0;
+  let indicator = null;
+  let triggered = false;
+
+  el.addEventListener("touchstart", e => {
+    if (el.scrollTop === 0) startY = e.touches[0].clientY;
+  }, { passive: true });
+
+  el.addEventListener("touchmove", e => {
+    if (el.scrollTop > 0 || !startY) return;
+    const dist = e.touches[0].clientY - startY;
+    if (dist > 55 && !indicator) {
+      indicator = document.createElement("div");
+      indicator.className = "pull-indicator";
+      indicator.textContent = "↓ Release to refresh";
+      el.prepend(indicator);
+    }
+    if (dist > 55) triggered = true;
+  }, { passive: true });
+
+  el.addEventListener("touchend", () => {
+    indicator?.remove(); indicator = null;
+    if (triggered) { triggered = false; refreshFn(); }
+    startY = 0;
+  }, { passive: true });
 }
 
 /* ── Router ─────────────────────────────────────────────────── */
@@ -202,7 +290,7 @@ function renderLogin() {
       const btn = document.getElementById("forgot-btn");
       btn.disabled = true; btn.textContent = "Sending...";
       try {
-        const data = await api("/api/auth/forgot-password", { method: "POST", body: { email: document.getElementById("forgot-email").value } });
+        await api("/api/auth/forgot-password", { method: "POST", body: { email: document.getElementById("forgot-email").value } });
         showToast("Request sent. Karson will share your reset token.", "success");
         document.getElementById("reset-section").style.display = "block";
         btn.disabled = false; btn.textContent = "Request Reset";
@@ -242,14 +330,14 @@ function headerHTML() {
     </header>`;
 }
 
-window.logout = function() { state = { token: null, user: null, view: "login", loginTab: "signin" }; render(); };
+window.logout = function() { state = { token: null, user: null, view: "login", loginTab: "signin", lbFilter: "all", quickClaim: false }; render(); };
 window.navigate = function(view) { state.view = view; render(); };
 
 function repNavHTML(active) {
   return `<nav class="rep-nav">
-    <button class="rep-nav-item ${active === "dashboard" ? "active" : ""}" onclick="navigate('rep-dashboard')"><i data-lucide="home" style="width:20px;height:20px"></i>Dashboard</button>
-    <button class="rep-nav-item ${active === "submit" ? "active" : ""}" onclick="navigate('rep-submit')"><i data-lucide="plus-circle" style="width:20px;height:20px"></i>Log Claim</button>
-    <button class="rep-nav-item ${active === "leaderboard" ? "active" : ""}" onclick="navigate('rep-leaderboard')"><i data-lucide="trophy" style="width:20px;height:20px"></i>Leaderboard</button>
+    <button class="rep-nav-item ${active === "dashboard" ? "active" : ""}" onclick="navigate('rep-dashboard')"><i data-lucide="home" style="width:22px;height:22px"></i>Dashboard</button>
+    <button class="rep-nav-item ${active === "submit" ? "active" : ""}" onclick="navigate('rep-submit')"><i data-lucide="plus-circle" style="width:22px;height:22px"></i>Log Claim</button>
+    <button class="rep-nav-item ${active === "leaderboard" ? "active" : ""}" onclick="navigate('rep-leaderboard')"><i data-lucide="trophy" style="width:22px;height:22px"></i>Leaderboard</button>
   </nav>`;
 }
 
@@ -263,15 +351,18 @@ async function renderRepDashboard() {
     const pct = dist ? Math.min(100, (dist.current_fund_balance / dist.initial_fund_amount) * 100) : 0;
     const motivator = motivatorMessage(stats);
 
-    app.querySelector(".app-main").innerHTML = `
-      <!-- Motivator card -->
+    const main = app.querySelector(".app-main");
+    main.innerHTML = `
+      ${streakBannerHTML(stats.streak_weeks || 0)}
+
       <div class="motivator-card">
         <span class="motivator-emoji">${motivator.emoji}</span>
         <span class="motivator-text">${motivator.msg}</span>
         ${stats.streak_weeks > 0 ? `<span class="streak-badge">${streakLabel(stats.streak_weeks)}</span>` : ""}
       </div>
 
-      <!-- Stats grid -->
+      ${weekCompareHTML(stats)}
+
       <div class="stats-grid">
         <div class="stat-card" style="grid-column:1/-1;">
           <div class="stat-label">${esc(dist?.name)} SPIFF Fund</div>
@@ -283,6 +374,7 @@ async function renderRepDashboard() {
           <div class="stat-label">Total Earned</div>
           <div class="stat-value green">${fmtCurrency(stats.total_earned)}</div>
           <div class="stat-sub">${stats.approved_claims} approved</div>
+          ${milestoneHTML(stats.total_earned)}
         </div>
         <div class="stat-card">
           <div class="stat-label">This Month</div>
@@ -303,7 +395,10 @@ async function renderRepDashboard() {
 
       <div class="section-header">
         <h3>My Claims</h3>
-        <button class="btn btn-primary" onclick="navigate('rep-submit')"><i data-lucide="plus" style="width:16px;height:16px"></i> Log Claim</button>
+        <div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;">
+          <button class="btn btn-secondary btn-sm" onclick="quickClaim()"><i data-lucide="zap" style="width:14px;height:14px"></i> Quick Claim</button>
+          <button class="btn btn-primary" onclick="navigate('rep-submit')"><i data-lucide="plus" style="width:16px;height:16px"></i> Log Claim</button>
+        </div>
       </div>
       ${claims.length === 0
         ? `<div class="empty-state"><i data-lucide="store" style="width:48px;height:48px"></i><h4>No claims yet</h4><p>Hit the street and log your first new door.</p></div>`
@@ -312,13 +407,21 @@ async function renderRepDashboard() {
             <td>${fmtDate(c.order_date)}</td>
             <td>${esc(c.store_name)}<br><span style="font-size:11px;color:var(--text-muted)">${esc(c.store_city)}${c.store_city && c.store_state ? ", " : ""}${esc(c.store_state)}</span></td>
             <td><span class="badge badge-type">${c.claim_type_icon || ""} ${esc(c.claim_type_label)}</span></td>
-            <td>${fmtCurrency(c.payout_amount)}${c.bonus_applied ? `<br><span style="font-size:11px;color:var(--sesh-teal)">${esc(c.bonus_applied)}</span>` : ""}</td>
+            <td>${fmtCurrency(c.payout_amount)}${c.bonus_applied ? `<br><span style="font-size:11px;color:var(--sesh-dark)">${esc(c.bonus_applied)}</span>` : ""}</td>
             <td><span class="badge badge-${c.status.toLowerCase()}">${c.status}</span></td>
           </tr>`).join("")}
           </tbody></table></div>`}`;
+
     lucide.createIcons();
+    setupPullToRefresh(main, renderRepDashboard);
   } catch (err) { showToast(err.message, "error"); }
 }
+
+window.quickClaim = function() {
+  state.quickClaim = true;
+  state.view = "rep-submit";
+  render();
+};
 
 /* ── Rep Submit ─────────────────────────────────────────────── */
 async function renderRepSubmit() {
@@ -342,10 +445,10 @@ async function renderRepSubmit() {
             `).join("")}
           </div>
           <div id="payout-preview" class="payout-preview-bar" style="display:none"></div>
-          <div class="form-group"><label>Store Name *</label><input type="text" class="form-input" id="store-name" placeholder="e.g. Quick Stop Market" required></div>
+          <div class="form-group"><label>Store Name *</label><input type="text" class="form-input" id="store-name" placeholder="e.g. Quick Stop Market" required autocomplete="off"></div>
           <div class="form-row">
             <div class="form-group"><label>City</label><input type="text" class="form-input" id="store-city" placeholder="Seattle"></div>
-            <div class="form-group"><label>State</label><input type="text" class="form-input" id="store-state" placeholder="WA" maxlength="2"></div>
+            <div class="form-group"><label>State</label>${stateSelectHTML()}</div>
           </div>
           <div class="form-row">
             <div class="form-group"><label>Order Date *</label><input type="date" class="form-input" id="order-date" required></div>
@@ -367,6 +470,11 @@ async function renderRepSubmit() {
     document.getElementById("order-date").valueAsDate = new Date();
     lucide.createIcons();
 
+    if (state.quickClaim) {
+      state.quickClaim = false;
+      setTimeout(() => document.getElementById("store-name")?.focus(), 80);
+    }
+
     const updatePreview = async () => {
       const activeBtn = document.querySelector(".claim-type-btn.active");
       const dateEl = document.getElementById("order-date");
@@ -375,8 +483,8 @@ async function renderRepSubmit() {
           const info = await api(`/api/payout-preview?claim_type_id=${activeBtn.dataset.typeId}&order_date=${dateEl.value}`);
           const preview = document.getElementById("payout-preview");
           if (info.bonus_info) {
-            preview.style.display = "block";
-            preview.innerHTML = `<i data-lucide="zap" style="width:14px;height:14px;color:var(--sesh-teal)"></i> <strong>${fmtCurrency(info.payout)}</strong> payout &middot; ${esc(info.bonus_info)}`;
+            preview.style.display = "flex";
+            preview.innerHTML = `<i data-lucide="zap" style="width:14px;height:14px;color:var(--sesh-dark)"></i> <strong>${fmtCurrency(info.payout)}</strong> payout &middot; ${esc(info.bonus_info)}`;
             lucide.createIcons();
           } else { preview.style.display = "none"; }
         } catch { /* ignore */ }
@@ -435,10 +543,25 @@ async function renderLeaderboard() {
   lucide.createIcons();
   try {
     const board = await api("/api/leaderboard");
+    const myEntry = board.find(r => r.is_current_user);
+    const myDist = myEntry?.distributor_name || "";
 
-    const top3 = board.slice(0, 3);
-    const rest = board.slice(3);
+    const filtered = (state.lbFilter === "my-dist" && myDist)
+      ? board.filter(r => r.distributor_name === myDist)
+      : board;
+
+    // Re-number ranks within filtered view
+    const reranked = filtered.map((r, i) => ({ ...r, display_rank: i + 1 }));
+    const top3 = reranked.slice(0, 3);
+    const rest = reranked.slice(3);
     const medals = ["🥇","🥈","🥉"];
+
+    const rankChangeHTML = (r) => {
+      if (r.rank_change == null) return "";
+      if (r.rank_change > 0) return ` <span class="rank-up">▲${r.rank_change}</span>`;
+      if (r.rank_change < 0) return ` <span class="rank-down">▼${Math.abs(r.rank_change)}</span>`;
+      return "";
+    };
 
     const podiumHTML = top3.length ? `
       <div class="podium">
@@ -446,10 +569,10 @@ async function renderLeaderboard() {
           <div class="podium-card ${r.is_current_user ? "is-me" : ""}">
             <div class="podium-medal">${medals[i]}</div>
             <div class="podium-avatar">${r.name[0].toUpperCase()}</div>
-            <div class="podium-name">${esc(r.name)}</div>
+            <div class="podium-name">${esc(r.name)}${r.is_current_user ? " <span class='you-badge'>You</span>" : ""}</div>
             <div class="podium-dist">${esc(r.distributor_name || "")}</div>
-            <div class="podium-doors">${r.doors_this_month} door${r.doors_this_month !== 1 ? "s" : ""}</div>
-            <div class="podium-earned">${fmtCurrency(r.total_earned)}</div>
+            <div class="podium-doors">${r.doors_this_month} this mo.</div>
+            <div class="podium-earned">${r.doors_alltime != null ? r.doors_alltime + " all-time" : fmtCurrency(r.total_earned)}</div>
             ${r.streak_weeks > 0 ? `<div class="podium-streak">${streakLabel(r.streak_weeks)}</div>` : ""}
           </div>
         `).join("")}
@@ -458,17 +581,17 @@ async function renderLeaderboard() {
     const restHTML = rest.length ? `
       <div class="leaderboard-list">
         ${rest.map(r => `
-          <div class="lb-row ${r.is_current_user ? "is-me" : ""}">
-            <span class="lb-rank">#${r.rank}</span>
+          <div class="lb-row ${r.is_current_user ? "is-me" : ""}" id="${r.is_current_user ? "lb-me" : ""}">
+            <span class="lb-rank">#${r.display_rank}${rankChangeHTML(r)}</span>
             <div class="lb-avatar">${r.name[0].toUpperCase()}</div>
             <div class="lb-info">
-              <div class="lb-name">${esc(r.name)} ${r.is_current_user ? "<span class='you-badge'>You</span>" : ""}</div>
+              <div class="lb-name">${esc(r.name)}${r.is_current_user ? " <span class='you-badge'>You</span>" : ""}</div>
               <div class="lb-dist">${esc(r.distributor_name || "")}</div>
             </div>
             <div class="lb-right">
-              <div class="lb-doors">${r.doors_this_month} door${r.doors_this_month !== 1 ? "s" : ""}</div>
-              <div class="lb-earned">${fmtCurrency(r.total_earned)}</div>
-              ${r.streak_weeks > 0 ? `<div style="font-size:11px;color:var(--sesh-teal)">${streakLabel(r.streak_weeks)}</div>` : ""}
+              <div class="lb-doors">${r.doors_this_month} this mo.</div>
+              <div class="lb-earned">${r.doors_alltime != null ? r.doors_alltime + " all-time" : fmtCurrency(r.total_earned)}</div>
+              ${r.streak_weeks > 0 ? `<div style="font-size:11px;color:var(--sesh-dark);font-weight:600;">${streakLabel(r.streak_weeks)}</div>` : ""}
             </div>
           </div>
         `).join("")}
@@ -479,12 +602,26 @@ async function renderLeaderboard() {
         <h3>Leaderboard</h3>
         <span style="font-size:12px;color:var(--text-muted)">New doors this month</span>
       </div>
-      ${board.length === 0
+      ${myDist ? `
+      <div class="lb-filter-bar">
+        <button class="lb-filter-btn ${state.lbFilter === "all" ? "active" : ""}" onclick="setLbFilter('all')">All Reps</button>
+        <button class="lb-filter-btn ${state.lbFilter === "my-dist" ? "active" : ""}" onclick="setLbFilter('my-dist')">${esc(myDist)}</button>
+      </div>` : ""}
+      ${reranked.length === 0
         ? `<div class="empty-state"><i data-lucide="trophy" style="width:48px;height:48px"></i><h4>No activity yet</h4><p>Be the first to log a new door.</p></div>`
         : podiumHTML + restHTML}`;
+
     lucide.createIcons();
+
+    // Scroll current user row into view after short delay
+    setTimeout(() => {
+      document.getElementById("lb-me")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 200);
+
   } catch (err) { showToast(err.message, "error"); }
 }
+
+window.setLbFilter = function(filter) { state.lbFilter = filter; renderLeaderboard(); };
 
 /* ── Admin Dashboard ────────────────────────────────────────── */
 function adminNavHTML(active) {
@@ -504,41 +641,102 @@ async function renderAdminDashboard(section) {
   else if (section === "settings") await renderAdminSettings();
 }
 
+/* ── Admin Claims — invoice thumb + bulk approve ────────────── */
 async function renderAdminClaims() {
   const content = document.getElementById("admin-content");
   try {
     const [claims, stats] = await Promise.all([api("/api/claims"), api("/api/stats/admin")]);
+    window._pendingSelected = new Set();
+
     content.innerHTML = `
       <div class="stats-grid" style="margin-bottom:var(--sp-6)">
-        <div class="stat-card"><div class="stat-label">Pending Review</div><div class="stat-value" style="color:var(--warning)">${stats.pending_claims || 0}</div></div>
+        <div class="stat-card"><div class="stat-label">Pending Review</div><div class="stat-value" style="color:var(--pending)">${stats.pending_claims || 0}</div></div>
         <div class="stat-card"><div class="stat-label">Approved</div><div class="stat-value green">${stats.approved_claims || 0}</div></div>
         <div class="stat-card"><div class="stat-label">Total Paid</div><div class="stat-value teal">${fmtCurrency(stats.total_paid)}</div></div>
         <div class="stat-card"><div class="stat-label">Total Claims</div><div class="stat-value">${stats.total_claims || 0}</div></div>
       </div>
       <div class="section-header">
         <h3>All Claims</h3>
-        <button class="btn btn-secondary btn-sm" onclick="exportClaims()"><i data-lucide="download" style="width:14px;height:14px"></i> Export CSV</button>
+        <div style="display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;">
+          <button class="btn btn-success btn-sm" id="bulk-approve-btn" style="display:none" onclick="bulkApprove()">
+            <i data-lucide="check-circle" style="width:14px;height:14px"></i> Approve Selected (<span id="bulk-count">0</span>)
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="exportClaims()"><i data-lucide="download" style="width:14px;height:14px"></i> Export CSV</button>
+        </div>
       </div>
-      ${claims.length === 0 ? `<div class="empty-state"><i data-lucide="inbox" style="width:48px;height:48px"></i><h4>No claims yet</h4></div>` : `
-        <div class="table-wrapper"><table class="claims-table"><thead><tr><th>Rep</th><th>Distributor</th><th>Store</th><th>Type</th><th>Date</th><th>Payout</th><th>Status</th><th>Action</th></tr></thead><tbody>
-          ${claims.map(c => `<tr>
-            <td><strong>${esc(c.rep_name)}</strong><br><span style="font-size:11px;color:var(--text-muted)">${esc(c.rep_email)}</span></td>
-            <td>${esc(c.distributor_name)}</td>
-            <td>${esc(c.store_name)}<br><span style="font-size:11px;color:var(--text-muted)">${esc(c.store_city)}${c.store_city && c.store_state ? ", " : ""}${esc(c.store_state)}</span></td>
-            <td><span class="badge badge-type">${c.claim_type_icon || ""} ${esc(c.claim_type_label)}</span><br>${c.rolls_count > 0 ? `<span style="font-size:11px;color:var(--text-muted)">${c.rolls_count} rolls</span>` : ""}</td>
-            <td>${fmtDate(c.order_date)}</td>
-            <td>${fmtCurrency(c.payout_amount)}${c.bonus_applied ? `<br><span style="font-size:11px;color:var(--sesh-teal)">${esc(c.bonus_applied)}</span>` : ""}</td>
-            <td><span class="badge badge-${c.status.toLowerCase()}">${c.status}</span>${c.rejection_reason ? `<br><span style="font-size:10px;color:var(--text-muted)">${esc(c.rejection_reason)}</span>` : ""}</td>
-            <td>${c.status === "PENDING" ? `
-              <div class="claim-actions">
-                <button class="btn btn-success btn-sm" onclick="reviewClaim('${c.id}','APPROVED')">Approve</button>
-                <button class="btn btn-danger btn-sm" onclick="rejectClaimPrompt('${c.id}')">Reject</button>
-              </div>` : "—"}</td>
-          </tr>`).join("")}
-        </tbody></table></div>`}`;
+      ${claims.length === 0
+        ? `<div class="empty-state"><i data-lucide="inbox" style="width:48px;height:48px"></i><h4>No claims yet</h4></div>`
+        : `<div class="table-wrapper"><table class="claims-table">
+            <thead><tr>
+              <th><input type="checkbox" id="bulk-select-all" onchange="toggleAllPending(this.checked)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--sesh-dark)"></th>
+              <th>Rep</th><th>Distributor</th><th>Store</th><th>Type</th><th>Date</th><th>Payout</th><th>Invoice</th><th>Status</th><th>Action</th>
+            </tr></thead>
+            <tbody>
+              ${claims.map(c => `<tr>
+                <td>${c.status === "PENDING" ? `<input type="checkbox" class="bulk-cb" data-id="${c.id}" onchange="toggleBulkSelect('${c.id}',this.checked)" style="width:16px;height:16px;cursor:pointer;accent-color:var(--sesh-dark)">` : ""}</td>
+                <td><strong>${esc(c.rep_name)}</strong><br><span style="font-size:11px;color:var(--text-muted)">${esc(c.rep_email)}</span></td>
+                <td>${esc(c.distributor_name)}</td>
+                <td>${esc(c.store_name)}<br><span style="font-size:11px;color:var(--text-muted)">${esc(c.store_city)}${c.store_city && c.store_state ? ", " : ""}${esc(c.store_state)}</span></td>
+                <td><span class="badge badge-type">${c.claim_type_icon || ""} ${esc(c.claim_type_label)}</span><br>${c.rolls_count > 0 ? `<span style="font-size:11px;color:var(--text-muted)">${c.rolls_count} rolls</span>` : ""}</td>
+                <td>${fmtDate(c.order_date)}</td>
+                <td>${fmtCurrency(c.payout_amount)}${c.bonus_applied ? `<br><span style="font-size:11px;color:var(--sesh-dark)">${esc(c.bonus_applied)}</span>` : ""}</td>
+                <td>${c.invoice_image_url ? `<img src="${esc(c.invoice_image_url)}" class="invoice-thumb" onclick="viewInvoice('${esc(c.invoice_image_url)}')" alt="Invoice" loading="lazy">` : "—"}</td>
+                <td><span class="badge badge-${c.status.toLowerCase()}">${c.status}</span>${c.rejection_reason ? `<br><span style="font-size:10px;color:var(--text-muted)">${esc(c.rejection_reason)}</span>` : ""}</td>
+                <td>${c.status === "PENDING" ? `
+                  <div class="claim-actions">
+                    <button class="btn btn-success btn-sm" onclick="reviewClaim('${c.id}','APPROVED')">Approve</button>
+                    <button class="btn btn-danger btn-sm" onclick="rejectClaimPrompt('${c.id}')">Reject</button>
+                  </div>` : "—"}</td>
+              </tr>`).join("")}
+            </tbody>
+          </table></div>`}`;
     lucide.createIcons();
   } catch (err) { showToast(err.message, "error"); }
 }
+
+window.toggleBulkSelect = function(id, checked) {
+  const sel = window._pendingSelected || (window._pendingSelected = new Set());
+  checked ? sel.add(id) : sel.delete(id);
+  const count = sel.size;
+  const btn = document.getElementById("bulk-approve-btn");
+  const countEl = document.getElementById("bulk-count");
+  if (btn) btn.style.display = count > 0 ? "inline-flex" : "none";
+  if (countEl) countEl.textContent = count;
+};
+
+window.toggleAllPending = function(checked) {
+  document.querySelectorAll(".bulk-cb").forEach(cb => {
+    cb.checked = checked;
+    window.toggleBulkSelect(cb.dataset.id, checked);
+  });
+};
+
+window.bulkApprove = async function() {
+  const sel = window._pendingSelected;
+  if (!sel || sel.size === 0) return;
+  const ids = [...sel];
+  const btn = document.getElementById("bulk-approve-btn");
+  if (btn) { btn.disabled = true; btn.querySelector("span")?.remove(); btn.lastChild.textContent = " Approving..."; }
+  try {
+    await Promise.all(ids.map(id =>
+      api(`/api/claims/${id}/review`, { method: "PUT", body: { status: "APPROVED", rejection_reason: null } })
+    ));
+    showToast(`${ids.length} claim${ids.length !== 1 ? "s" : ""} approved ✓`, "success");
+    renderAdminClaims();
+  } catch (err) { showToast(err.message, "error"); renderAdminClaims(); }
+};
+
+window.viewInvoice = function(url) {
+  const modal = document.createElement("div"); modal.className = "modal-overlay";
+  modal.innerHTML = `<div class="modal-card" style="max-width:640px;text-align:center">
+    <h3 style="margin-bottom:var(--sp-4)">Invoice</h3>
+    <img src="${url}" class="invoice-preview" alt="Invoice photo">
+    <div class="modal-actions" style="justify-content:center;margin-top:var(--sp-4)">
+      <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Close</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+};
 
 window.reviewClaim = async function(id, status, reason) {
   try {
@@ -568,6 +766,7 @@ window.exportClaims = async function() {
   } catch (err) { showToast(err.message, "error"); }
 };
 
+/* ── Admin Funds — with rep count ───────────────────────────── */
 async function renderAdminFunds() {
   const content = document.getElementById("admin-content");
   try {
@@ -575,7 +774,8 @@ async function renderAdminFunds() {
     content.innerHTML = `
       <div class="section-header"><h3>Distributor Funds & Invite Codes</h3></div>
       ${distributors.map(d => {
-        const pct = Math.min(100, (d.current_fund_balance / d.initial_fund_amount) * 100);
+        const pct = d.initial_fund_amount ? Math.min(100, (d.current_fund_balance / d.initial_fund_amount) * 100) : 0;
+        const repCount = d.rep_count ?? d.active_reps ?? null;
         return `<div class="dist-fund-card">
           <div class="dist-fund-header">
             <div>
@@ -592,6 +792,7 @@ async function renderAdminFunds() {
             <span>${fmtCurrency(d.current_fund_balance)} remaining</span>
             <span>${fmtCurrency(d.total_paid_out)} paid out</span>
             <span>${d.approved_claims} approved claims</span>
+            ${repCount != null ? `<span><strong>${repCount}</strong> rep${repCount !== 1 ? "s" : ""}</span>` : ""}
           </div>
         </div>`;
       }).join("")}`;
@@ -631,7 +832,7 @@ window.openAddFundsModal = function(distId, distName, currentBalance) {
     </div>
     <div id="fund-mode-set">
       <div class="form-group"><label>New Balance ($)</label><input type="number" class="form-input" id="set-balance-amount" min="0" placeholder="5000"></div>
-      <p style="font-size:11px;color:var(--text-muted);margin-top:-var(--sp-3);">This replaces the current balance entirely.</p>
+      <p style="font-size:11px;color:var(--text-muted);">This replaces the current balance entirely.</p>
     </div>
     <div id="fund-mode-add" style="display:none">
       <div class="form-group"><label>Amount to Add ($)</label><input type="number" class="form-input" id="add-funds-amount" min="1" placeholder="1000"></div>
