@@ -310,6 +310,87 @@ def calculate_payout(db, claim_type_id: str, distributor_id: str, order_date: st
 
     return {"payout": payout, "min_rolls": min_rolls, "max_payout": max_payout, "bonus_info": bonus_info}
 
+def _ensure_pop_requests_table(db):
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS pop_requests (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            distributor_id TEXT NOT NULL,
+            request_type TEXT NOT NULL,
+            store_name TEXT NOT NULL,
+            store_city TEXT,
+            store_state TEXT,
+            quantity INTEGER NOT NULL DEFAULT 1,
+            notes TEXT,
+            status TEXT NOT NULL DEFAULT 'PENDING'
+                CHECK(status IN ('PENDING', 'IN_PROGRESS', 'FULFILLED', 'DECLINED')),
+            admin_note TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (distributor_id) REFERENCES distributors(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pop_user ON pop_requests(user_id);
+        CREATE INDEX IF NOT EXISTS idx_pop_status ON pop_requests(status);
+    """)
+    db.commit()
+
+# POP table is created at startup via the module-level call below
+# (called once when the module loads so the table exists immediately)
+
+def _ensure_door_lists_table(db):
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS rep_doors (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            distributor_id TEXT NOT NULL,
+            door_type TEXT NOT NULL CHECK(door_type IN ('ACTIVE', 'TARGET')),
+            store_name TEXT NOT NULL,
+            store_city TEXT,
+            store_state TEXT,
+            verified INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (distributor_id) REFERENCES distributors(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_doors_user ON rep_doors(user_id);
+        CREATE INDEX IF NOT EXISTS idx_doors_type ON rep_doors(door_type);
+
+        CREATE TABLE IF NOT EXISTS rep_door_bonus (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL UNIQUE,
+            distributor_id TEXT NOT NULL,
+            claim_id TEXT,
+            paid_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+    """)
+    db.commit()
+
+
+def _ensure_notes_tables(db):
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS rep_scratchpad (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL UNIQUE,
+            content TEXT NOT NULL DEFAULT '',
+            updated_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS store_notes (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            store_name TEXT NOT NULL,
+            note TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_store_notes_user ON store_notes(user_id);
+        CREATE INDEX IF NOT EXISTS idx_store_notes_store ON store_notes(user_id, store_name);
+    """)
+    db.commit()
+
 # ── App ─────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app):
@@ -1159,34 +1240,6 @@ POP_REQUEST_TYPES = [
     "Door Strike",
 ]
 
-def _ensure_pop_requests_table(db):
-    db.executescript("""
-        CREATE TABLE IF NOT EXISTS pop_requests (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            distributor_id TEXT NOT NULL,
-            request_type TEXT NOT NULL,
-            store_name TEXT NOT NULL,
-            store_city TEXT,
-            store_state TEXT,
-            quantity INTEGER NOT NULL DEFAULT 1,
-            notes TEXT,
-            status TEXT NOT NULL DEFAULT 'PENDING'
-                CHECK(status IN ('PENDING', 'IN_PROGRESS', 'FULFILLED', 'DECLINED')),
-            admin_note TEXT,
-            created_at TEXT DEFAULT (datetime('now')),
-            updated_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (user_id) REFERENCES users(id),
-            FOREIGN KEY (distributor_id) REFERENCES distributors(id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_pop_user ON pop_requests(user_id);
-        CREATE INDEX IF NOT EXISTS idx_pop_status ON pop_requests(status);
-    """)
-    db.commit()
-
-# POP table is created at startup via the module-level call below
-# (called once when the module loads so the table exists immediately)
-
 class PopRequestCreate(BaseModel):
     request_type: str
     store_name: str
@@ -1308,36 +1361,6 @@ def my_stores(user=Depends(get_current_user)):
 # ── Door Lists ──────────────────────────────────────────────────────
 DOOR_LIST_BONUS_AMOUNT = 10.0
 DOOR_LIST_BONUS_NAME = "Door List Submission Bonus"
-
-def _ensure_door_lists_table(db):
-    db.executescript("""
-        CREATE TABLE IF NOT EXISTS rep_doors (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            distributor_id TEXT NOT NULL,
-            door_type TEXT NOT NULL CHECK(door_type IN ('ACTIVE', 'TARGET')),
-            store_name TEXT NOT NULL,
-            store_city TEXT,
-            store_state TEXT,
-            verified INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (user_id) REFERENCES users(id),
-            FOREIGN KEY (distributor_id) REFERENCES distributors(id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_doors_user ON rep_doors(user_id);
-        CREATE INDEX IF NOT EXISTS idx_doors_type ON rep_doors(door_type);
-
-        CREATE TABLE IF NOT EXISTS rep_door_bonus (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL UNIQUE,
-            distributor_id TEXT NOT NULL,
-            claim_id TEXT,
-            paid_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        );
-    """)
-    db.commit()
-
 
 # ── Door List Models ────────────────────────────────────────────────
 class DoorEntry(BaseModel):
@@ -1576,29 +1599,6 @@ def delete_door(door_id: str, user=Depends(get_current_user)):
     return {"deleted": door_id}
 
 # ── Notes ───────────────────────────────────────────────────────────
-
-def _ensure_notes_tables(db):
-    db.executescript("""
-        CREATE TABLE IF NOT EXISTS rep_scratchpad (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL UNIQUE,
-            content TEXT NOT NULL DEFAULT '',
-            updated_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS store_notes (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            store_name TEXT NOT NULL,
-            note TEXT NOT NULL,
-            created_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_store_notes_user ON store_notes(user_id);
-        CREATE INDEX IF NOT EXISTS idx_store_notes_store ON store_notes(user_id, store_name);
-    """)
-    db.commit()
 
 class ScratchpadUpdate(BaseModel):
     content: str
