@@ -9,17 +9,17 @@ let state = {
   user: null,
   view: "login",
   loginTab: "signin",
-  lbFilter: "all",   // "all" | "my-dist"
+  lbFilter: "my-dist",   // "all" | "my-dist"
   quickClaim: false,
 };
 
 /* ── US States ──────────────────────────────────────────────── */
 const US_STATES = [
-  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
-  "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
-  "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
-  "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
-  "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"
+  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
+  "HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
+  "MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+  "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC",
+  "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"
 ];
 function stateSelectHTML(selected = "") {
   return `<select class="form-input" id="store-state">
@@ -276,14 +276,12 @@ function renderLogin() {
       const btn = document.getElementById("signup-btn");
       btn.disabled = true; btn.textContent = "Creating account...";
       try {
-        const data = await api("/api/auth/signup", {
-          method: "POST", body: {
-            name: document.getElementById("signup-name").value,
-            email: document.getElementById("signup-email").value,
-            password: document.getElementById("signup-password").value,
-            invite_code: document.getElementById("invite-code").value.trim().toUpperCase(),
-          }
-        });
+        const data = await api("/api/auth/signup", { method: "POST", body: {
+          name: document.getElementById("signup-name").value,
+          email: document.getElementById("signup-email").value,
+          password: document.getElementById("signup-password").value,
+          invite_code: document.getElementById("invite-code").value.trim().toUpperCase(),
+        }});
         state.token = data.token; state.user = data.user;
         state.view = "rep-dashboard";
         showToast(`Welcome to Sesh SPIFF, ${data.user.name}! 🎉`, "success");
@@ -309,12 +307,10 @@ function renderLogin() {
       const btn = document.getElementById("reset-btn");
       btn.disabled = true; btn.textContent = "Updating...";
       try {
-        await api("/api/auth/reset-password", {
-          method: "POST", body: {
-            token: document.getElementById("reset-token").value.trim(),
-            new_password: document.getElementById("reset-password").value,
-          }
-        });
+        await api("/api/auth/reset-password", { method: "POST", body: {
+          token: document.getElementById("reset-token").value.trim(),
+          new_password: document.getElementById("reset-password").value,
+        }});
         showToast("Password updated! Sign in with your new password.", "success");
         state.loginTab = "signin"; render();
       } catch (err) { showToast(err.message, "error"); btn.disabled = false; btn.textContent = "Set New Password"; }
@@ -322,7 +318,7 @@ function renderLogin() {
   }
 }
 
-window.setLoginTab = function (tab) { state.loginTab = tab; render(); };
+window.setLoginTab = function(tab) { state.loginTab = tab; render(); };
 
 /* ── Header & Nav ───────────────────────────────────────────── */
 function headerHTML() {
@@ -340,8 +336,8 @@ function headerHTML() {
     </header>`;
 }
 
-window.logout = function () { state = { token: null, user: null, view: "login", loginTab: "signin", lbFilter: "all", quickClaim: false }; render(); };
-window.navigate = function (view) { state.view = view; render(); };
+window.logout = function() { state = { token: null, user: null, view: "login", loginTab: "signin", lbFilter: "my-dist", quickClaim: false }; render(); };
+window.navigate = function(view) { state.view = view; render(); };
 
 function repNavHTML(active) {
   return `<nav class="rep-nav">
@@ -445,7 +441,7 @@ async function renderRepDashboard() {
   } catch (err) { showToast(err.message, "error"); }
 }
 
-window.quickClaim = function () {
+window.quickClaim = function() {
   state.quickClaim = true;
   state.view = "rep-submit";
   render();
@@ -552,11 +548,11 @@ async function renderRepSubmit() {
   } catch (err) { showToast(err.message, "error"); }
 }
 
-window.selectClaimTypeById = function (id) {
+window.selectClaimTypeById = function(id) {
   document.querySelectorAll(".claim-type-btn").forEach(b => b.classList.remove("active"));
   document.querySelector(`[data-type-id="${id}"]`)?.classList.add("active");
 };
-window.handleFileSelect = function (input) {
+window.handleFileSelect = function(input) {
   const area = document.getElementById("upload-area");
   if (input.files.length > 0) {
     area.classList.add("has-file");
@@ -574,7 +570,7 @@ async function renderLeaderboard() {
     const myEntry = board.find(r => r.is_current_user);
     const myDist = myEntry?.distributor_name || "";
 
-    const filtered = (state.lbFilter === "my-dist" && myDist)
+    const filtered = myDist
       ? board.filter(r => r.distributor_name === myDist)
       : board;
 
@@ -582,7 +578,7 @@ async function renderLeaderboard() {
     const reranked = filtered.map((r, i) => ({ ...r, display_rank: i + 1 }));
     const top3 = reranked.slice(0, 3);
     const rest = reranked.slice(3);
-    const medals = ["🥇", "🥈", "🥉"];
+    const medals = ["🥇","🥈","🥉"];
 
     const rankChangeHTML = (r) => {
       if (r.rank_change == null) return "";
@@ -630,11 +626,7 @@ async function renderLeaderboard() {
         <h3>Leaderboard</h3>
         <span style="font-size:12px;color:var(--text-muted)">New doors this month</span>
       </div>
-      ${myDist ? `
-      <div class="lb-filter-bar">
-        <button class="lb-filter-btn ${state.lbFilter === "all" ? "active" : ""}" onclick="setLbFilter('all')">All Reps</button>
-        <button class="lb-filter-btn ${state.lbFilter === "my-dist" ? "active" : ""}" onclick="setLbFilter('my-dist')">${esc(myDist)}</button>
-      </div>` : ""}
+
       ${reranked.length === 0
         ? `<div class="empty-state"><i data-lucide="trophy" style="width:48px;height:48px"></i><h4>No activity yet</h4><p>Be the first to log a new door.</p></div>`
         : podiumHTML + restHTML}`;
@@ -649,7 +641,7 @@ async function renderLeaderboard() {
   } catch (err) { showToast(err.message, "error"); }
 }
 
-window.setLbFilter = function (filter) { state.lbFilter = filter; renderLeaderboard(); };
+window.setLbFilter = function(filter) { state.lbFilter = filter; renderLeaderboard(); };
 
 /* ── Admin Dashboard ────────────────────────────────────────── */
 function adminNavHTML(active) {
@@ -726,7 +718,7 @@ async function renderAdminClaims() {
   } catch (err) { showToast(err.message, "error"); }
 }
 
-window.toggleBulkSelect = function (id, checked) {
+window.toggleBulkSelect = function(id, checked) {
   const sel = window._pendingSelected || (window._pendingSelected = new Set());
   checked ? sel.add(id) : sel.delete(id);
   const count = sel.size;
@@ -736,14 +728,14 @@ window.toggleBulkSelect = function (id, checked) {
   if (countEl) countEl.textContent = count;
 };
 
-window.toggleAllPending = function (checked) {
+window.toggleAllPending = function(checked) {
   document.querySelectorAll(".bulk-cb").forEach(cb => {
     cb.checked = checked;
     window.toggleBulkSelect(cb.dataset.id, checked);
   });
 };
 
-window.bulkApprove = async function () {
+window.bulkApprove = async function() {
   const sel = window._pendingSelected;
   if (!sel || sel.size === 0) return;
   const ids = [...sel];
@@ -758,7 +750,7 @@ window.bulkApprove = async function () {
   } catch (err) { showToast(err.message, "error"); renderAdminClaims(); }
 };
 
-window.viewInvoice = function (url) {
+window.viewInvoice = function(url) {
   const modal = document.createElement("div"); modal.className = "modal-overlay";
   modal.innerHTML = `<div class="modal-card" style="max-width:640px;text-align:center">
     <h3 style="margin-bottom:var(--sp-4)">Invoice</h3>
@@ -770,7 +762,7 @@ window.viewInvoice = function (url) {
   document.body.appendChild(modal);
 };
 
-window.reviewClaim = async function (id, status, reason) {
+window.reviewClaim = async function(id, status, reason) {
   try {
     await api(`/api/claims/${id}/review`, { method: "PUT", body: { status, rejection_reason: reason || null } });
     showToast(status === "APPROVED" ? "Claim approved ✓" : "Claim rejected", status === "APPROVED" ? "success" : "info");
@@ -778,7 +770,7 @@ window.reviewClaim = async function (id, status, reason) {
   } catch (err) { showToast(err.message, "error"); }
 };
 
-window.rejectClaimPrompt = function (id) {
+window.rejectClaimPrompt = function(id) {
   const modal = document.createElement("div"); modal.className = "modal-overlay";
   modal.innerHTML = `<div class="modal-card"><h3>Reject Claim</h3>
     <div class="form-group"><label>Reason (optional)</label><input type="text" class="form-input" id="reject-reason" placeholder="e.g. Duplicate submission"></div>
@@ -789,7 +781,7 @@ window.rejectClaimPrompt = function (id) {
   document.body.appendChild(modal);
 };
 
-window.exportClaims = async function () {
+window.exportClaims = async function() {
   try {
     const blob = await api("/api/claims/export");
     const url = URL.createObjectURL(blob);
@@ -806,9 +798,9 @@ async function renderAdminFunds() {
     content.innerHTML = `
       <div class="section-header"><h3>Distributor Funds & Invite Codes</h3></div>
       ${distributors.map(d => {
-      const pct = d.initial_fund_amount ? Math.min(100, (d.current_fund_balance / d.initial_fund_amount) * 100) : 0;
-      const repCount = d.rep_count ?? d.active_reps ?? null;
-      return `<div class="dist-fund-card">
+        const pct = d.initial_fund_amount ? Math.min(100, (d.current_fund_balance / d.initial_fund_amount) * 100) : 0;
+        const repCount = d.rep_count ?? d.active_reps ?? null;
+        return `<div class="dist-fund-card">
           <div class="dist-fund-header">
             <div>
               <h4>${esc(d.name)}</h4>
@@ -827,12 +819,12 @@ async function renderAdminFunds() {
             ${repCount != null ? `<span><strong>${repCount}</strong> rep${repCount !== 1 ? "s" : ""}</span>` : ""}
           </div>
         </div>`;
-    }).join("")}`;
+      }).join("")}`;
     lucide.createIcons();
   } catch (err) { showToast(err.message, "error"); }
 }
 
-window.editInviteCode = function (distId, currentCode) {
+window.editInviteCode = function(distId, currentCode) {
   const modal = document.createElement("div"); modal.className = "modal-overlay";
   modal.innerHTML = `<div class="modal-card"><h3>Edit Invite Code</h3>
     <p style="font-size:13px;color:var(--text-muted);margin-bottom:var(--sp-5);">Share this code with reps at this distributor so they can self-register.</p>
@@ -844,7 +836,7 @@ window.editInviteCode = function (distId, currentCode) {
   document.body.appendChild(modal);
 };
 
-window.saveInviteCode = async function (distId) {
+window.saveInviteCode = async function(distId) {
   const code = document.getElementById("new-invite-code")?.value?.trim().toUpperCase();
   document.querySelector(".modal-overlay")?.remove();
   if (!code) return;
@@ -854,7 +846,7 @@ window.saveInviteCode = async function (distId) {
   } catch (err) { showToast(err.message, "error"); }
 };
 
-window.openAddFundsModal = function (distId, distName, currentBalance) {
+window.openAddFundsModal = function(distId, distName, currentBalance) {
   const modal = document.createElement("div"); modal.className = "modal-overlay";
   modal.innerHTML = `<div class="modal-card"><h3>Manage Fund — ${esc(distName)}</h3>
     <p style="font-size:13px;color:var(--text-muted);margin-bottom:var(--sp-5);">Current balance: <strong>${fmtCurrency(currentBalance)}</strong></p>
@@ -876,14 +868,14 @@ window.openAddFundsModal = function (distId, distName, currentBalance) {
   document.body.appendChild(modal);
 };
 
-window.setFundMode = function (mode) {
+window.setFundMode = function(mode) {
   document.getElementById("fund-mode-set").style.display = mode === "set" ? "block" : "none";
   document.getElementById("fund-mode-add").style.display = mode === "add" ? "block" : "none";
   document.getElementById("mode-set").classList.toggle("active", mode === "set");
   document.getElementById("mode-add").classList.toggle("active", mode === "add");
 };
 
-window.submitFundUpdate = async function (distId) {
+window.submitFundUpdate = async function(distId) {
   const isSet = document.getElementById("fund-mode-set").style.display !== "none";
   const amount = parseFloat((isSet
     ? document.getElementById("set-balance-amount")
@@ -931,9 +923,9 @@ async function renderAdminSettings() {
           <thead><tr><th>Name</th><th>Type</th><th>Value</th><th>Applies To</th><th>Dates</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
             ${bonusPrograms.map(bp => {
-          const isActive = bp.is_active && bp.start_date <= today && bp.end_date >= today;
-          const isPast = bp.end_date < today;
-          return `<tr style="${isPast ? "opacity:0.5" : ""}">
+              const isActive = bp.is_active && bp.start_date <= today && bp.end_date >= today;
+              const isPast = bp.end_date < today;
+              return `<tr style="${isPast ? "opacity:0.5" : ""}">
                 <td><strong>${esc(bp.name)}</strong><br><span style="font-size:12px;color:var(--text-muted)">${esc(bp.description || "")}</span></td>
                 <td><span class="badge badge-type">${bp.bonus_type === "FLAT_BONUS" ? "Flat Bonus" : bp.bonus_type === "MULTIPLIER" ? "Multiplier" : "Override"}</span></td>
                 <td><strong>${bp.bonus_type === "MULTIPLIER" ? bp.bonus_value + "x" : fmtCurrency(bp.bonus_value)}</strong></td>
@@ -945,7 +937,7 @@ async function renderAdminSettings() {
                   <button class="btn btn-danger btn-sm" onclick="deleteBonus('${bp.id}')">Delete</button>
                 </div></td>
               </tr>`;
-        }).join("")}
+            }).join("")}
           </tbody></table></div>`}`;
     lucide.createIcons();
     window._settingsData = { claimTypes, distributors };
@@ -953,7 +945,7 @@ async function renderAdminSettings() {
 }
 
 /* ── Settings Modals ────────────────────────────────────────── */
-window.openAddClaimTypeModal = function () {
+window.openAddClaimTypeModal = function() {
   const modal = document.createElement("div"); modal.className = "modal-overlay";
   modal.innerHTML = `<div class="modal-card"><h3>Add Claim Type</h3>
     <div class="form-group"><label>Label</label><input type="text" class="form-input" id="ct-label" placeholder="Chain Authorization" required></div>
@@ -970,26 +962,24 @@ window.openAddClaimTypeModal = function () {
   document.body.appendChild(modal);
 };
 
-window.submitAddClaimType = async function () {
+window.submitAddClaimType = async function() {
   const label = document.getElementById("ct-label")?.value;
   const payout = parseFloat(document.getElementById("ct-payout")?.value || "0");
   if (!label || payout < 0) { showToast("Fill in required fields.", "error"); return; }
   document.querySelector(".modal-overlay")?.remove();
   try {
-    await api("/api/claim-types", {
-      method: "POST", body: {
-        name: label.toUpperCase().replace(/\s+/g, "_"),
-        label, description: document.getElementById("ct-desc")?.value || "",
-        base_payout: payout, min_rolls: parseInt(document.getElementById("ct-min-rolls")?.value || "0", 10),
-        max_payout: parseFloat(document.getElementById("ct-max-payout")?.value) || null,
-        icon: document.getElementById("ct-icon")?.value || "📋",
-      }
-    });
+    await api("/api/claim-types", { method: "POST", body: {
+      name: label.toUpperCase().replace(/\s+/g, "_"),
+      label, description: document.getElementById("ct-desc")?.value || "",
+      base_payout: payout, min_rolls: parseInt(document.getElementById("ct-min-rolls")?.value || "0", 10),
+      max_payout: parseFloat(document.getElementById("ct-max-payout")?.value) || null,
+      icon: document.getElementById("ct-icon")?.value || "📋",
+    }});
     showToast("Claim type created.", "success"); render();
   } catch (err) { showToast(err.message, "error"); }
 };
 
-window.openEditClaimTypeModal = function (ct) {
+window.openEditClaimTypeModal = function(ct) {
   const modal = document.createElement("div"); modal.className = "modal-overlay";
   modal.innerHTML = `<div class="modal-card"><h3>Edit: ${esc(ct.label)}</h3>
     <div class="form-group"><label>Label</label><input type="text" class="form-input" id="ct-edit-label" value="${esc(ct.label)}"></div>
@@ -1010,7 +1000,7 @@ window.openEditClaimTypeModal = function (ct) {
   document.body.appendChild(modal);
 };
 
-window.submitEditClaimType = async function (id) {
+window.submitEditClaimType = async function(id) {
   const body = {
     label: document.getElementById("ct-edit-label")?.value,
     description: document.getElementById("ct-edit-desc")?.value,
@@ -1025,7 +1015,7 @@ window.submitEditClaimType = async function (id) {
   catch (err) { showToast(err.message, "error"); }
 };
 
-window.openAddBonusModal = function () {
+window.openAddBonusModal = function() {
   const data = window._settingsData || {};
   const modal = document.createElement("div"); modal.className = "modal-overlay";
   modal.innerHTML = `<div class="modal-card"><h3>Create Bonus / Contest</h3>
@@ -1053,7 +1043,7 @@ window.openAddBonusModal = function () {
   document.body.appendChild(modal);
 };
 
-window.submitAddBonus = async function () {
+window.submitAddBonus = async function() {
   const name = document.getElementById("bp-name")?.value;
   if (!name) { showToast("Name is required.", "error"); return; }
   const body = {
@@ -1071,11 +1061,11 @@ window.submitAddBonus = async function () {
   catch (err) { showToast(err.message, "error"); }
 };
 
-window.toggleBonus = async function (id) {
+window.toggleBonus = async function(id) {
   try { await api(`/api/bonus-programs/${id}/toggle`, { method: "PUT" }); showToast("Updated.", "success"); render(); }
   catch (err) { showToast(err.message, "error"); }
 };
-window.deleteBonus = async function (id) {
+window.deleteBonus = async function(id) {
   try { await api(`/api/bonus-programs/${id}`, { method: "DELETE" }); showToast("Deleted.", "success"); render(); }
   catch (err) { showToast(err.message, "error"); }
 };
@@ -1091,7 +1081,7 @@ function doorSectionBodyHTML(doorData) {
   const targetDoors = doors.filter(d => d.door_type === "TARGET");
   const shown = activeTab === "ACTIVE" ? activeDoors : targetDoors;
   const storeListId = "door-datalist";
-  const storeDatalist = `<datalist id="${storeListId}">${(window._doorStores || []).map(s => `<option value="${esc(s.store_name)}"></option>`).join("")}</datalist>`;
+  const storeDatalist = `<datalist id="${storeListId}">${(window._doorStores||[]).map(s => `<option value="${esc(s.store_name)}"></option>`).join("")}</datalist>`;
 
   return `
     <div style="padding:var(--sp-4) 0 var(--sp-2)">
@@ -1116,7 +1106,7 @@ function doorSectionBodyHTML(doorData) {
         <input type="text" class="form-input" id="door-city-input" placeholder="City" style="width:100px">
         <select class="form-input" id="door-state-input" style="width:72px">
           <option value="">ST</option>
-          ${["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"].map(s => `<option value="${s}">${s}</option>`).join("")}
+          ${["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s => `<option value="${s}">${s}</option>`).join("")}
         </select>
         <button class="btn btn-primary btn-sm" onclick="addSingleDoor('${activeTab}')">Add</button>
       </div>
@@ -1130,15 +1120,15 @@ function doorSectionBodyHTML(doorData) {
       </div>
 
       ${shown.length === 0
-      ? `<div style="text-align:center;padding:var(--sp-6) 0;color:var(--text-muted);font-size:13px">No ${activeTab.toLowerCase()} doors yet — add one above or upload a CSV.</div>`
-      : `<div class="door-list-table-wrap">
+        ? `<div style="text-align:center;padding:var(--sp-6) 0;color:var(--text-muted);font-size:13px">No ${activeTab.toLowerCase()} doors yet — add one above or upload a CSV.</div>`
+        : `<div class="door-list-table-wrap">
             <table class="claims-table" style="font-size:12px">
               <thead><tr><th>Store</th><th>City</th><th>ST</th><th></th></tr></thead>
               <tbody>
                 ${shown.map(d => `<tr>
                   <td>${esc(d.store_name)}${d.verified ? " <span style=\'font-size:10px;color:#16a34a\'>✓</span>" : ""}</td>
-                  <td style="color:var(--text-muted)">${esc(d.store_city || "")}</td>
-                  <td style="color:var(--text-muted)">${esc(d.store_state || "")}</td>
+                  <td style="color:var(--text-muted)">${esc(d.store_city||"")}</td>
+                  <td style="color:var(--text-muted)">${esc(d.store_state||"")}</td>
                   <td><button class="btn-icon-sm" onclick="deleteDoor(\'${d.id}\')" title="Remove"><i data-lucide="x" style="width:12px;height:12px"></i></button></td>
                 </tr>`).join("")}
               </tbody>
@@ -1147,7 +1137,7 @@ function doorSectionBodyHTML(doorData) {
     </div>`;
 }
 
-window.toggleDoorSection = function () {
+window.toggleDoorSection = function() {
   state.doorSectionOpen = !state.doorSectionOpen;
   const body = document.getElementById("door-section-body");
   const chevron = document.getElementById("door-chevron");
@@ -1156,22 +1146,20 @@ window.toggleDoorSection = function () {
   if (state.doorSectionOpen) lucide.createIcons();
 };
 
-window.setDoorTab = function (tab) {
+window.setDoorTab = function(tab) {
   state.doorActiveTab = tab;
   renderRepDashboard();
 };
 
-window.addSingleDoor = async function (doorType) {
+window.addSingleDoor = async function(doorType) {
   const name = document.getElementById("door-store-input")?.value.trim();
   if (!name) { showToast("Store name required.", "error"); return; }
   const city = document.getElementById("door-city-input")?.value.trim() || "";
   const st = document.getElementById("door-state-input")?.value || "";
   try {
-    const res = await api("/api/doors", {
-      method: "POST", body: {
-        doors: [{ door_type: doorType, store_name: name, store_city: city, store_state: st }]
-      }
-    });
+    const res = await api("/api/doors", { method: "POST", body: {
+      doors: [{ door_type: doorType, store_name: name, store_city: city, store_state: st }]
+    }});
     if (res.bonus_awarded) {
       showToast(`Door added! 🎉 +$10 bonus unlocked — both lists submitted!`, "success");
     } else if (res.skipped > 0) {
@@ -1184,7 +1172,7 @@ window.addSingleDoor = async function (doorType) {
   } catch (err) { showToast(err.message, "error"); }
 };
 
-window.handleDoorCSV = async function (input, doorType) {
+window.handleDoorCSV = async function(input, doorType) {
   const file = input.files[0];
   if (!file) return;
   const text = await file.text();
@@ -1208,7 +1196,7 @@ window.handleDoorCSV = async function (input, doorType) {
   } catch (err) { showToast(err.message, "error"); }
 };
 
-window.deleteDoor = async function (id) {
+window.deleteDoor = async function(id) {
   try {
     await api(`/api/doors/${id}`, { method: "DELETE" });
     renderRepDashboard();
@@ -1239,8 +1227,8 @@ async function renderAdminDoors() {
           <thead><tr><th>Rep</th><th>Distributor</th><th>Active</th><th>Target</th><th>Verified</th><th>Bonus</th><th></th></tr></thead>
           <tbody>
             ${summary.length === 0
-        ? `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:var(--sp-6)">No doors submitted yet.</td></tr>`
-        : summary.map(s => `<tr>
+              ? `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:var(--sp-6)">No doors submitted yet.</td></tr>`
+              : summary.map(s => `<tr>
                   <td><strong>${esc(s.rep_name)}</strong></td>
                   <td>${esc(s.distributor_name)}</td>
                   <td style="text-align:center">${s.active_count}</td>
@@ -1267,8 +1255,8 @@ async function renderAdminDoors() {
           <tbody>
             ${filteredDoors.filter(d => d.door_type === (state.adminDoorTypeFilter || "ACTIVE")).map(d => `<tr>
               <td>${esc(d.store_name)}</td>
-              <td style="color:var(--text-muted)">${esc(d.store_city || "")}</td>
-              <td style="color:var(--text-muted)">${esc(d.store_state || "")}</td>
+              <td style="color:var(--text-muted)">${esc(d.store_city||"")}</td>
+              <td style="color:var(--text-muted)">${esc(d.store_state||"")}</td>
               <td style="text-align:center">${d.verified ? '<span style="color:#16a34a;font-weight:600">✓</span>' : '—'}</td>
               <td>
                 <button class="btn btn-secondary btn-sm" onclick="toggleDoorVerify('${d.id}',${d.verified ? 0 : 1})">
@@ -1283,43 +1271,43 @@ async function renderAdminDoors() {
   } catch (err) { showToast(err.message, "error"); }
 }
 
-window.filterAdminDoors = function (userId) {
+window.filterAdminDoors = function(userId) {
   state.adminDoorRepFilter = state.adminDoorRepFilter === userId ? null : userId;
   state.adminDoorTypeFilter = "ACTIVE";
   renderAdminDoors();
 };
 
-window.setAdminDoorType = function (type) {
+window.setAdminDoorType = function(type) {
   state.adminDoorTypeFilter = type;
   renderAdminDoors();
 };
 
-window.toggleDoorVerify = async function (id, verified) {
+window.toggleDoorVerify = async function(id, verified) {
   try {
     await api(`/api/doors/${id}/verify`, { method: "PUT", body: { verified: !!verified } });
     renderAdminDoors();
   } catch (err) { showToast(err.message, "error"); }
 };
 
-window.exportDoors = async function () {
+window.exportDoors = async function() {
   try {
     const blob = await api("/api/doors/export");
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = `sesh_doors_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.href = url; a.download = `sesh_doors_${new Date().toISOString().slice(0,10)}.csv`;
     a.click(); URL.revokeObjectURL(url);
   } catch (err) { showToast(err.message, "error"); }
 };
 
 /* ── Rep: POP / Sample Requests ─────────────────────────────── */
 const POP_REQUEST_TYPES = [
-  "POP Display", "Shelf Talker", "Product Samples", "Counter Display", "Window Cling", "Door Strike"
+  "POP Display","Shelf Talker","Product Samples","Counter Display","Window Cling","Door Strike"
 ];
 const POP_STATUS_STYLE = {
-  PENDING: { badge: "badge-pending", label: "Submitted" },
-  IN_PROGRESS: { badge: "badge-type", label: "In Progress" },
-  FULFILLED: { badge: "badge-approved", label: "Fulfilled" },
-  DECLINED: { badge: "badge-rejected", label: "Declined" },
+  PENDING:     { badge: "badge-pending",  label: "Submitted" },
+  IN_PROGRESS: { badge: "badge-type",     label: "In Progress" },
+  FULFILLED:   { badge: "badge-approved", label: "Fulfilled" },
+  DECLINED:    { badge: "badge-rejected", label: "Declined" },
 };
 
 async function renderRepRequests() {
@@ -1359,7 +1347,7 @@ async function renderRepRequests() {
           </div>
           <div class="form-row">
             <div class="form-group"><label>City</label><input type="text" class="form-input" id="pop-city" placeholder="Seattle"></div>
-            <div class="form-group"><label>State</label>${stateSelectHTML().replace('id="store-state"', 'id="pop-state"')}</div>
+            <div class="form-group"><label>State</label>${stateSelectHTML().replace('id="store-state"','id="pop-state"')}</div>
           </div>
           <div class="form-group">
             <label>Quantity</label>
@@ -1384,9 +1372,9 @@ async function renderRepRequests() {
             <thead><tr><th>Date</th><th>Type</th><th>Store</th><th>Qty</th><th>Status</th></tr></thead>
             <tbody>
               ${requests.map(r => {
-          const s = POP_STATUS_STYLE[r.status] || POP_STATUS_STYLE.PENDING;
-          return `<tr>
-                  <td style="white-space:nowrap">${fmtDate(r.created_at?.split("T")[0] || r.created_at?.slice(0, 10))}</td>
+                const s = POP_STATUS_STYLE[r.status] || POP_STATUS_STYLE.PENDING;
+                return `<tr>
+                  <td style="white-space:nowrap">${fmtDate(r.created_at?.split("T")[0] || r.created_at?.slice(0,10))}</td>
                   <td><span class="badge badge-type">${esc(r.request_type)}</span></td>
                   <td>${esc(r.store_name)}<br><span style="font-size:11px;color:var(--text-muted)">${esc(r.store_city || "")}${r.store_city && r.store_state ? ", " : ""}${esc(r.store_state || "")}</span></td>
                   <td style="text-align:center">${r.quantity}</td>
@@ -1395,7 +1383,7 @@ async function renderRepRequests() {
                     ${r.admin_note ? `<br><span style="font-size:10px;color:var(--text-muted)">${esc(r.admin_note)}</span>` : ""}
                   </td>
                 </tr>`;
-        }).join("")}
+              }).join("")}
             </tbody>
           </table></div>`}`;
 
@@ -1413,16 +1401,14 @@ async function renderRepRequests() {
       if (!storeName) { showToast("Store name is required.", "error"); return; }
       btn.disabled = true; btn.lastChild.textContent = " Submitting...";
       try {
-        await api("/api/pop-requests", {
-          method: "POST", body: {
-            request_type: activeType,
-            store_name: storeName,
-            store_city: document.getElementById("pop-city").value.trim(),
-            store_state: document.getElementById("pop-state").value,
-            quantity: parseInt(document.getElementById("pop-qty").value, 10) || 1,
-            notes: document.getElementById("pop-notes").value.trim(),
-          }
-        });
+        await api("/api/pop-requests", { method: "POST", body: {
+          request_type: activeType,
+          store_name: storeName,
+          store_city: document.getElementById("pop-city").value.trim(),
+          store_state: document.getElementById("pop-state").value,
+          quantity: parseInt(document.getElementById("pop-qty").value, 10) || 1,
+          notes: document.getElementById("pop-notes").value.trim(),
+        }});
         showToast("Request submitted ✓", "success");
         renderRepRequests();
       } catch (err) { showToast(err.message, "error"); btn.disabled = false; btn.lastChild.textContent = " Submit Request"; }
@@ -1431,12 +1417,12 @@ async function renderRepRequests() {
   } catch (err) { showToast(err.message, "error"); }
 }
 
-window.selectPopType = function (el) {
+window.selectPopType = function(el) {
   document.querySelectorAll(".claim-type-btn[data-pop-type]").forEach(b => b.classList.remove("active"));
   el.classList.add("active");
 };
 
-window.autofillPopStore = function (input) {
+window.autofillPopStore = function(input) {
   const stores = window._popStores || [];
   const match = stores.find(s => s.store_name.toLowerCase() === input.value.toLowerCase());
   if (match) {
@@ -1453,7 +1439,7 @@ async function renderAdminRequests() {
   try {
     const [requests, stats] = await Promise.all([
       api("/api/pop-requests"),
-      api("/api/pop-requests/admin-stats").catch(() => ({ total: 0, pending: 0, in_progress: 0, fulfilled: 0, declined: 0 })),
+      api("/api/pop-requests/admin-stats").catch(() => ({ total:0, pending:0, in_progress:0, fulfilled:0, declined:0 })),
     ]);
 
     content.innerHTML = `
@@ -1470,9 +1456,9 @@ async function renderAdminRequests() {
             <thead><tr><th>Date</th><th>Rep</th><th>Distributor</th><th>Type</th><th>Store</th><th>Qty</th><th>Notes</th><th>Status</th><th>Action</th></tr></thead>
             <tbody>
               ${requests.map(r => {
-          const s = POP_STATUS_STYLE[r.status] || POP_STATUS_STYLE.PENDING;
-          return `<tr>
-                  <td style="white-space:nowrap">${fmtDate(r.created_at?.split("T")[0] || r.created_at?.slice(0, 10))}</td>
+                const s = POP_STATUS_STYLE[r.status] || POP_STATUS_STYLE.PENDING;
+                return `<tr>
+                  <td style="white-space:nowrap">${fmtDate(r.created_at?.split("T")[0] || r.created_at?.slice(0,10))}</td>
                   <td><strong>${esc(r.rep_name)}</strong><br><span style="font-size:11px;color:var(--text-muted)">${esc(r.rep_email)}</span></td>
                   <td>${esc(r.distributor_name)}</td>
                   <td><span class="badge badge-type">${esc(r.request_type)}</span></td>
@@ -1492,7 +1478,7 @@ async function renderAdminRequests() {
                     </div>` : "—"}
                   </td>
                 </tr>`;
-        }).join("")}
+              }).join("")}
             </tbody>
           </table></div>`}`;
 
@@ -1500,7 +1486,7 @@ async function renderAdminRequests() {
   } catch (err) { showToast(err.message, "error"); }
 }
 
-window.updatePopRequest = async function (id, status, adminNote) {
+window.updatePopRequest = async function(id, status, adminNote) {
   try {
     await api(`/api/pop-requests/${id}`, { method: "PUT", body: { status, admin_note: adminNote || null } });
     showToast(status === "FULFILLED" ? "Marked as fulfilled ✓" : "Status updated", "success");
@@ -1508,7 +1494,7 @@ window.updatePopRequest = async function (id, status, adminNote) {
   } catch (err) { showToast(err.message, "error"); }
 };
 
-window.declinePopRequestPrompt = function (id) {
+window.declinePopRequestPrompt = function(id) {
   const modal = document.createElement("div"); modal.className = "modal-overlay";
   modal.innerHTML = `<div class="modal-card"><h3>Decline Request</h3>
     <div class="form-group"><label>Reason (optional)</label><input type="text" class="form-input" id="decline-note" placeholder="e.g. Out of stock, check back next month"></div>
@@ -1534,7 +1520,7 @@ async function renderRepNotes() {
       api("/api/notes/stores").catch(() => ({ notes: [], stores: [] })),
     ]);
 
-    const notes = notesData.notes || [];
+    const notes  = notesData.notes  || [];
     const stores = notesData.stores || [];
 
     // Group store notes by store_name
@@ -1606,8 +1592,8 @@ async function renderRepNotes() {
         <!-- Notes log -->
         <div id="store-notes-log">
           ${storeNames.length === 0
-        ? `<div style="text-align:center;padding:var(--sp-6);color:var(--text-muted);font-size:13px">No account notes yet — add one above.</div>`
-        : (activeStore ? [activeStore] : storeNames).map(store => `
+            ? `<div style="text-align:center;padding:var(--sp-6);color:var(--text-muted);font-size:13px">No account notes yet — add one above.</div>`
+            : (activeStore ? [activeStore] : storeNames).map(store => `
               <div class="store-note-group">
                 <div class="store-note-group-header">
                   <i data-lucide="store" style="width:13px;height:13px"></i>
@@ -1631,7 +1617,7 @@ async function renderRepNotes() {
     lucide.createIcons();
 
     // Scratchpad autosave
-    document.getElementById("scratchpad-area").addEventListener("input", function () {
+    document.getElementById("scratchpad-area").addEventListener("input", function() {
       const status = document.getElementById("scratch-status");
       if (status) { status.textContent = "saving…"; status.className = "scratch-status saving"; }
       clearTimeout(_scratchpadTimer);
@@ -1639,7 +1625,7 @@ async function renderRepNotes() {
         try {
           await api("/api/notes/scratchpad", { method: "PUT", body: { content: this.value } });
           const s = document.getElementById("scratch-status");
-          if (s) { s.textContent = "saved"; s.className = "scratch-status saved"; setTimeout(() => { if (s) s.textContent = ""; }, 2000); }
+          if (s) { s.textContent = "saved"; s.className = "scratch-status saved"; setTimeout(() => { if(s) s.textContent = ""; }, 2000); }
         } catch (e) { /* silent */ }
       }, 800);
     });
@@ -1654,16 +1640,16 @@ function fmtNoteDate(d) {
     " · " + dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
-window.filterNoteStore = function (store) {
+window.filterNoteStore = function(store) {
   state.notesStoreFilter = store;
   renderRepNotes();
 };
 
-window.addStoreNote = async function () {
+window.addStoreNote = async function() {
   const storeName = document.getElementById("note-store-input")?.value.trim();
-  const noteText = document.getElementById("note-text-input")?.value.trim();
+  const noteText  = document.getElementById("note-text-input")?.value.trim();
   if (!storeName) { showToast("Store name required.", "error"); return; }
-  if (!noteText) { showToast("Note cannot be empty.", "error"); return; }
+  if (!noteText)  { showToast("Note cannot be empty.", "error"); return; }
   try {
     await api("/api/notes/stores", { method: "POST", body: { store_name: storeName, note: noteText } });
     state.notesStoreFilter = storeName;
@@ -1671,7 +1657,7 @@ window.addStoreNote = async function () {
   } catch (err) { showToast(err.message, "error"); }
 };
 
-window.deleteStoreNote = async function (id) {
+window.deleteStoreNote = async function(id) {
   try {
     await api(`/api/notes/stores/${id}`, { method: "DELETE" });
     renderRepNotes();
@@ -1683,8 +1669,8 @@ async function renderAdminNotes() {
   const content = document.getElementById("admin-content");
   try {
     const data = await api("/api/notes/admin");
-    const scratchpads = data.scratchpads || [];
-    const storeNotes = data.store_notes || [];
+    const scratchpads  = data.scratchpads  || [];
+    const storeNotes   = data.store_notes  || [];
 
     // Group store notes by rep
     const notesByRep = {};
@@ -1717,13 +1703,13 @@ async function renderAdminNotes() {
       ${repIds.length === 0
         ? `<p style="color:var(--text-muted);font-size:13px">No account notes yet.</p>`
         : repIds.map(uid => {
-          const rep = notesByRep[uid];
-          const byStore = {};
-          for (const n of rep.notes) {
-            if (!byStore[n.store_name]) byStore[n.store_name] = [];
-            byStore[n.store_name].push(n);
-          }
-          return `
+            const rep = notesByRep[uid];
+            const byStore = {};
+            for (const n of rep.notes) {
+              if (!byStore[n.store_name]) byStore[n.store_name] = [];
+              byStore[n.store_name].push(n);
+            }
+            return `
               <div class="admin-note-card">
                 <div class="admin-note-card-header">
                   <strong>${esc(rep.rep_name)}</strong>
@@ -1742,7 +1728,7 @@ async function renderAdminNotes() {
                       </div>`).join("")}
                   </div>`).join("")}
               </div>`;
-        }).join("")}`;
+          }).join("")}`;
 
     lucide.createIcons();
   } catch (err) { showToast(err.message, "error"); }
