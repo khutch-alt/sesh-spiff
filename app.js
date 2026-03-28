@@ -187,7 +187,9 @@ function render() {
     case "rep-dashboard": renderRepDashboard(); break;
     case "rep-submit": renderRepSubmit(); break;
     case "rep-leaderboard": renderLeaderboard(); break;
+    case "rep-requests": renderRepRequests(); break;
     case "admin-claims": renderAdminDashboard("claims"); break;
+    case "admin-requests": renderAdminDashboard("requests"); break;
     case "admin-funds": renderAdminDashboard("funds"); break;
     case "admin-settings": renderAdminDashboard("settings"); break;
     default: renderLogin();
@@ -337,6 +339,8 @@ function repNavHTML(active) {
   return `<nav class="rep-nav">
     <button class="rep-nav-item ${active === "dashboard" ? "active" : ""}" onclick="navigate('rep-dashboard')"><i data-lucide="home" style="width:22px;height:22px"></i>Dashboard</button>
     <button class="rep-nav-item ${active === "submit" ? "active" : ""}" onclick="navigate('rep-submit')"><i data-lucide="plus-circle" style="width:22px;height:22px"></i>Log Claim</button>
+    <button class="rep-nav-item ${active === "requests" ? "active" : ""}" onclick="navigate('rep-requests')"><i data-lucide="package" style="width:22px;height:22px"></i>Requests</button>
+    <button class="rep-nav-item ${active === "notes" ? "active" : ""}" onclick="navigate('rep-notes')"><i data-lucide="notebook-pen" style="width:22px;height:22px"></i>Notes</button>
     <button class="rep-nav-item ${active === "leaderboard" ? "active" : ""}" onclick="navigate('rep-leaderboard')"><i data-lucide="trophy" style="width:22px;height:22px"></i>Leaderboard</button>
   </nav>`;
 }
@@ -346,7 +350,7 @@ async function renderRepDashboard() {
   app.innerHTML = `${headerHTML()}<main class="app-main has-bottom-nav"><div class="loading-spinner"><div class="spinner"></div></div></main>${repNavHTML("dashboard")}`;
   lucide.createIcons();
   try {
-    const [stats, claims] = await Promise.all([api("/api/stats/me"), api("/api/claims")]);
+    const [stats, claims, doorData] = await Promise.all([api("/api/stats/me"), api("/api/claims"), api("/api/doors/me")]);
     const dist = stats.distributor;
     const pct = dist ? Math.min(100, (dist.current_fund_balance / dist.initial_fund_amount) * 100) : 0;
     const motivator = motivatorMessage(stats);
@@ -390,6 +394,22 @@ async function renderRepDashboard() {
           <div class="stat-label">Pending</div>
           <div class="stat-value">${stats.pending_claims}</div>
           <div class="stat-sub">awaiting review</div>
+        </div>
+      </div>
+
+      <div class="door-list-section" id="door-list-section">
+        <div class="door-list-header" onclick="toggleDoorSection()">
+          <div style="display:flex;align-items:center;gap:var(--sp-3)">
+            <i data-lucide="map-pin" style="width:18px;height:18px"></i>
+            <div>
+              <div style="font-weight:600;font-size:14px">My Door List</div>
+              <div style="font-size:12px;color:var(--text-muted)">${doorData.active_count} active &middot; ${doorData.target_count} target${doorData.bonus_earned ? " &middot; <span style=\'color:#16a34a;font-weight:600\'>$10 bonus earned ✓</span>" : " &middot; <span style=\'color:var(--pending);font-weight:600\'>Submit both lists to earn $10</span>"}</div>
+            </div>
+          </div>
+          <i data-lucide="chevron-down" id="door-chevron" style="width:18px;height:18px;transition:transform .2s;${state.doorSectionOpen ? 'transform:rotate(180deg)' : ''}"></i>
+        </div>
+        <div id="door-section-body" style="display:${state.doorSectionOpen ? 'block' : 'none'}">
+          ${doorSectionBodyHTML(doorData)}
         </div>
       </div>
 
@@ -628,7 +648,10 @@ function adminNavHTML(active) {
   return `
     <div class="admin-tabs">
       <button class="admin-tab ${active === "claims" ? "active" : ""}" onclick="navigate('admin-claims')"><i data-lucide="file-check" style="width:16px;height:16px"></i> Claims</button>
+      <button class="admin-tab ${active === "requests" ? "active" : ""}" onclick="navigate('admin-requests')"><i data-lucide="package" style="width:16px;height:16px"></i> Requests</button>
+      <button class="admin-tab ${active === "doors" ? "active" : ""}" onclick="navigate('admin-doors')"><i data-lucide="map-pin" style="width:16px;height:16px"></i> Doors</button>
       <button class="admin-tab ${active === "funds" ? "active" : ""}" onclick="navigate('admin-funds')"><i data-lucide="landmark" style="width:16px;height:16px"></i> Funds</button>
+      <button class="admin-tab ${active === "notes" ? "active" : ""}" onclick="navigate('admin-notes')"><i data-lucide="notebook-pen" style="width:16px;height:16px"></i> Notes</button>
       <button class="admin-tab ${active === "settings" ? "active" : ""}" onclick="navigate('admin-settings')"><i data-lucide="settings" style="width:16px;height:16px"></i> Settings</button>
     </div>`;
 }
@@ -637,6 +660,7 @@ async function renderAdminDashboard(section) {
   app.innerHTML = `${headerHTML()}<main class="app-main">${adminNavHTML(section)}<div id="admin-content"><div class="loading-spinner"><div class="spinner"></div></div></div></main>`;
   lucide.createIcons();
   if (section === "claims") await renderAdminClaims();
+  else if (section === "requests") await renderAdminRequests();
   else if (section === "funds") await renderAdminFunds();
   else if (section === "settings") await renderAdminSettings();
 }
@@ -1046,5 +1070,666 @@ window.deleteBonus = async function(id) {
   catch (err) { showToast(err.message, "error"); }
 };
 
+/* ── Door List ───────────────────────────────────────────────── */
+state.doorSectionOpen = false;
+state.doorActiveTab = "ACTIVE";   // "ACTIVE" | "TARGET"
+
+function doorSectionBodyHTML(doorData) {
+  const doors = doorData.doors || [];
+  const activeTab = state.doorActiveTab || "ACTIVE";
+  const activeDoors = doors.filter(d => d.door_type === "ACTIVE");
+  const targetDoors = doors.filter(d => d.door_type === "TARGET");
+  const shown = activeTab === "ACTIVE" ? activeDoors : targetDoors;
+  const storeListId = "door-datalist";
+  const storeDatalist = `<datalist id="${storeListId}">${(window._doorStores||[]).map(s => `<option value="${esc(s.store_name)}"></option>`).join("")}</datalist>`;
+
+  return `
+    <div style="padding:var(--sp-4) 0 var(--sp-2)">
+      ${!doorData.bonus_earned ? `
+      <div class="door-bonus-banner">
+        <i data-lucide="gift" style="width:16px;height:16px"></i>
+        <span>Submit your <strong>Active</strong> and <strong>Target</strong> door lists to earn a <strong>$10 bonus</strong> — one time, auto-approved.</span>
+      </div>` : ""}
+
+      <div class="door-type-tabs">
+        <button class="door-tab ${activeTab === "ACTIVE" ? "active" : ""}" onclick="setDoorTab('ACTIVE')">
+          Active Doors <span class="door-count">${activeDoors.length}</span>
+        </button>
+        <button class="door-tab ${activeTab === "TARGET" ? "active" : ""}" onclick="setDoorTab('TARGET')">
+          Target Doors <span class="door-count">${targetDoors.length}</span>
+        </button>
+      </div>
+
+      <div class="door-add-row">
+        ${storeDatalist}
+        <input type="text" class="form-input" id="door-store-input" placeholder="Store name" list="${storeListId}" style="flex:1;min-width:0">
+        <input type="text" class="form-input" id="door-city-input" placeholder="City" style="width:100px">
+        <select class="form-input" id="door-state-input" style="width:72px">
+          <option value="">ST</option>
+          ${["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"].map(s => `<option value="${s}">${s}</option>`).join("")}
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="addSingleDoor('${activeTab}')">Add</button>
+      </div>
+
+      <div style="margin-bottom:var(--sp-3)">
+        <label class="door-csv-label">
+          <i data-lucide="upload" style="width:14px;height:14px"></i> Upload CSV
+          <input type="file" accept=".csv,.txt" onchange="handleDoorCSV(this,'${activeTab}')" style="display:none">
+        </label>
+        <span style="font-size:11px;color:var(--text-muted);margin-left:var(--sp-2)">Columns: store_name, city, state (header row optional)</span>
+      </div>
+
+      ${shown.length === 0
+        ? `<div style="text-align:center;padding:var(--sp-6) 0;color:var(--text-muted);font-size:13px">No ${activeTab.toLowerCase()} doors yet — add one above or upload a CSV.</div>`
+        : `<div class="door-list-table-wrap">
+            <table class="claims-table" style="font-size:12px">
+              <thead><tr><th>Store</th><th>City</th><th>ST</th><th></th></tr></thead>
+              <tbody>
+                ${shown.map(d => `<tr>
+                  <td>${esc(d.store_name)}${d.verified ? " <span style=\'font-size:10px;color:#16a34a\'>✓</span>" : ""}</td>
+                  <td style="color:var(--text-muted)">${esc(d.store_city||"")}</td>
+                  <td style="color:var(--text-muted)">${esc(d.store_state||"")}</td>
+                  <td><button class="btn-icon-sm" onclick="deleteDoor(\'${d.id}\')" title="Remove"><i data-lucide="x" style="width:12px;height:12px"></i></button></td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>`}
+    </div>`;
+}
+
+window.toggleDoorSection = function() {
+  state.doorSectionOpen = !state.doorSectionOpen;
+  const body = document.getElementById("door-section-body");
+  const chevron = document.getElementById("door-chevron");
+  if (body) body.style.display = state.doorSectionOpen ? "block" : "none";
+  if (chevron) chevron.style.transform = state.doorSectionOpen ? "rotate(180deg)" : "";
+  if (state.doorSectionOpen) lucide.createIcons();
+};
+
+window.setDoorTab = function(tab) {
+  state.doorActiveTab = tab;
+  renderRepDashboard();
+};
+
+window.addSingleDoor = async function(doorType) {
+  const name = document.getElementById("door-store-input")?.value.trim();
+  if (!name) { showToast("Store name required.", "error"); return; }
+  const city = document.getElementById("door-city-input")?.value.trim() || "";
+  const st = document.getElementById("door-state-input")?.value || "";
+  try {
+    const res = await api("/api/doors", { method: "POST", body: {
+      doors: [{ door_type: doorType, store_name: name, store_city: city, store_state: st }]
+    }});
+    if (res.bonus_awarded) {
+      showToast(`Door added! 🎉 +$10 bonus unlocked — both lists submitted!`, "success");
+    } else if (res.skipped > 0) {
+      showToast("That store is already in your list.", "info");
+    } else {
+      showToast("Door added ✓", "success");
+    }
+    state.doorSectionOpen = true;
+    renderRepDashboard();
+  } catch (err) { showToast(err.message, "error"); }
+};
+
+window.handleDoorCSV = async function(input, doorType) {
+  const file = input.files[0];
+  if (!file) return;
+  const text = await file.text();
+  const lines = text.trim().split(/\r?\n/).filter(Boolean);
+  const doors = [];
+  for (let i = 0; i < lines.length; i++) {
+    const parts = lines[i].split(",").map(p => p.trim().replace(/^["\']|["\']$/g, ""));
+    const name = parts[0];
+    if (!name || name.toLowerCase() === "store_name" || name.toLowerCase() === "store name") continue;
+    doors.push({ door_type: doorType, store_name: name, store_city: parts[1] || "", store_state: parts[2] || "" });
+  }
+  if (!doors.length) { showToast("No valid rows found in CSV.", "error"); return; }
+  try {
+    const res = await api("/api/doors", { method: "POST", body: { doors } });
+    let msg = `${res.inserted} door${res.inserted !== 1 ? "s" : ""} added`;
+    if (res.skipped) msg += `, ${res.skipped} skipped (duplicates)`;
+    if (res.bonus_awarded) msg += ` 🎉 +$10 bonus unlocked!`;
+    showToast(msg, "success");
+    state.doorSectionOpen = true;
+    renderRepDashboard();
+  } catch (err) { showToast(err.message, "error"); }
+};
+
+window.deleteDoor = async function(id) {
+  try {
+    await api(`/api/doors/${id}`, { method: "DELETE" });
+    renderRepDashboard();
+  } catch (err) { showToast(err.message, "error"); }
+};
+
+/* ── Admin: Door Lists ───────────────────────────────────────── */
+async function renderAdminDoors() {
+  const content = document.getElementById("admin-content");
+  try {
+    const data = await api("/api/doors/admin");
+    const summary = data.summary || [];
+    const doors = data.doors || [];
+    const selectedRep = state.adminDoorRepFilter || null;
+    const filteredDoors = selectedRep ? doors.filter(d => d.user_id === selectedRep) : doors;
+
+    content.innerHTML = `
+      <div class="section-header" style="margin-bottom:var(--sp-4)">
+        <h3>Rep Door Lists</h3>
+        <button class="btn btn-secondary btn-sm" onclick="exportDoors()">
+          <i data-lucide="download" style="width:14px;height:14px"></i> Export CSV
+        </button>
+      </div>
+
+      <div style="margin-bottom:var(--sp-6)">
+        <h4 style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:var(--sp-3)">By Rep</h4>
+        <div class="table-wrapper"><table class="claims-table">
+          <thead><tr><th>Rep</th><th>Distributor</th><th>Active</th><th>Target</th><th>Verified</th><th>Bonus</th><th></th></tr></thead>
+          <tbody>
+            ${summary.length === 0
+              ? `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:var(--sp-6)">No doors submitted yet.</td></tr>`
+              : summary.map(s => `<tr>
+                  <td><strong>${esc(s.rep_name)}</strong></td>
+                  <td>${esc(s.distributor_name)}</td>
+                  <td style="text-align:center">${s.active_count}</td>
+                  <td style="text-align:center">${s.target_count}</td>
+                  <td style="text-align:center">${s.verified_count}</td>
+                  <td>${s.bonus_earned ? '<span class="badge badge-approved">Paid</span>' : '<span class="badge" style="background:var(--bg-muted)">Pending</span>'}</td>
+                  <td><button class="btn btn-secondary btn-sm" onclick="filterAdminDoors('${s.user_id}')">${state.adminDoorRepFilter === s.user_id ? "Hide" : "View"}</button></td>
+                </tr>`).join("")}
+          </tbody>
+        </table></div>
+      </div>
+
+      ${selectedRep ? `
+        <div class="section-header" style="margin-bottom:var(--sp-3)">
+          <h4>${esc(summary.find(s => s.user_id === selectedRep)?.rep_name || "")}'s Doors</h4>
+          <button class="btn btn-secondary btn-sm" onclick="filterAdminDoors(null)">Close</button>
+        </div>
+        <div class="door-type-tabs" style="margin-bottom:var(--sp-3)">
+          <button class="door-tab ${state.adminDoorTypeFilter !== 'TARGET' ? 'active' : ''}" onclick="setAdminDoorType('ACTIVE')">Active</button>
+          <button class="door-tab ${state.adminDoorTypeFilter === 'TARGET' ? 'active' : ''}" onclick="setAdminDoorType('TARGET')">Target</button>
+        </div>
+        <div class="table-wrapper"><table class="claims-table" style="font-size:12px">
+          <thead><tr><th>Store</th><th>City</th><th>ST</th><th>Verified</th><th>Action</th></tr></thead>
+          <tbody>
+            ${filteredDoors.filter(d => d.door_type === (state.adminDoorTypeFilter || "ACTIVE")).map(d => `<tr>
+              <td>${esc(d.store_name)}</td>
+              <td style="color:var(--text-muted)">${esc(d.store_city||"")}</td>
+              <td style="color:var(--text-muted)">${esc(d.store_state||"")}</td>
+              <td style="text-align:center">${d.verified ? '<span style="color:#16a34a;font-weight:600">✓</span>' : '—'}</td>
+              <td>
+                <button class="btn btn-secondary btn-sm" onclick="toggleDoorVerify('${d.id}',${d.verified ? 0 : 1})">
+                  ${d.verified ? "Unverify" : "Verify"}
+                </button>
+              </td>
+            </tr>`).join("")}
+          </tbody>
+        </table></div>` : ""}`;
+
+    lucide.createIcons();
+  } catch (err) { showToast(err.message, "error"); }
+}
+
+window.filterAdminDoors = function(userId) {
+  state.adminDoorRepFilter = state.adminDoorRepFilter === userId ? null : userId;
+  state.adminDoorTypeFilter = "ACTIVE";
+  renderAdminDoors();
+};
+
+window.setAdminDoorType = function(type) {
+  state.adminDoorTypeFilter = type;
+  renderAdminDoors();
+};
+
+window.toggleDoorVerify = async function(id, verified) {
+  try {
+    await api(`/api/doors/${id}/verify`, { method: "PUT", body: { verified: !!verified } });
+    renderAdminDoors();
+  } catch (err) { showToast(err.message, "error"); }
+};
+
+window.exportDoors = async function() {
+  try {
+    const blob = await api("/api/doors/export");
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `sesh_doors_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  } catch (err) { showToast(err.message, "error"); }
+};
+
+/* ── Rep: POP / Sample Requests ─────────────────────────────── */
+const POP_REQUEST_TYPES = [
+  "POP Display","Shelf Talker","Product Samples","Counter Display","Window Cling","Door Strike"
+];
+const POP_STATUS_STYLE = {
+  PENDING:     { badge: "badge-pending",  label: "Submitted" },
+  IN_PROGRESS: { badge: "badge-type",     label: "In Progress" },
+  FULFILLED:   { badge: "badge-approved", label: "Fulfilled" },
+  DECLINED:    { badge: "badge-rejected", label: "Declined" },
+};
+
+async function renderRepRequests() {
+  app.innerHTML = `${headerHTML()}<main class="app-main has-bottom-nav"><div class="loading-spinner"><div class="spinner"></div></div></main>${repNavHTML("requests")}`;
+  lucide.createIcons();
+  try {
+    const [requests, stores] = await Promise.all([
+      api("/api/pop-requests"),
+      api("/api/my-stores"),
+    ]);
+
+    const storeListId = "store-datalist-" + Date.now();
+    const storeDatalist = `<datalist id="${storeListId}">${stores.map(s => `<option value="${esc(s.store_name)}" data-city="${esc(s.store_city || '')}" data-state="${esc(s.store_state || '')}"></option>`).join("")}</datalist>`;
+
+    const main = app.querySelector(".app-main");
+    main.innerHTML = `
+      <div class="section-header" style="margin-bottom:var(--sp-5)">
+        <h3>POP &amp; Sample Requests</h3>
+      </div>
+
+      <div class="claim-form-wrapper" style="margin-bottom:var(--sp-8)">
+        <h4 style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:var(--sp-4)">New Request</h4>
+        <form id="pop-form">
+          ${storeDatalist}
+          <div class="form-group">
+            <label>Request Type *</label>
+            <div class="claim-type-toggle" id="pop-type-toggle" style="grid-template-columns:repeat(3,1fr);gap:var(--sp-2)">
+              ${POP_REQUEST_TYPES.map((t, i) => `
+                <div class="claim-type-btn ${i === 0 ? "active" : ""}" data-pop-type="${esc(t)}" onclick="selectPopType(this)" style="padding:var(--sp-3) var(--sp-2)">
+                  <div class="type-label" style="font-size:12px;line-height:1.3">${esc(t)}</div>
+                </div>`).join("")}
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Store Name *</label>
+            <input type="text" class="form-input" id="pop-store" placeholder="Quick Stop Market" required autocomplete="off" list="${storeListId}" oninput="autofillPopStore(this)">
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>City</label><input type="text" class="form-input" id="pop-city" placeholder="Seattle"></div>
+            <div class="form-group"><label>State</label>${stateSelectHTML().replace('id="store-state"','id="pop-state"')}</div>
+          </div>
+          <div class="form-group">
+            <label>Quantity</label>
+            <input type="number" class="form-input" id="pop-qty" min="1" max="99" value="1">
+          </div>
+          <div class="form-group">
+            <label>Notes <span style="color:var(--text-muted);font-weight:400">(optional)</span></label>
+            <textarea class="form-input" id="pop-notes" rows="2" placeholder="Specific placement, account context, etc." style="resize:vertical;min-height:64px"></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary btn-block" id="pop-submit-btn">
+            <i data-lucide="send" style="width:16px;height:16px"></i> Submit Request
+          </button>
+        </form>
+      </div>
+
+      <div class="section-header" style="margin-bottom:var(--sp-4)">
+        <h3>My Requests</h3>
+      </div>
+      ${requests.length === 0
+        ? `<div class="empty-state"><i data-lucide="package" style="width:48px;height:48px"></i><h4>No requests yet</h4><p>Submit your first POP or sample request above.</p></div>`
+        : `<div class="table-wrapper"><table class="claims-table">
+            <thead><tr><th>Date</th><th>Type</th><th>Store</th><th>Qty</th><th>Status</th></tr></thead>
+            <tbody>
+              ${requests.map(r => {
+                const s = POP_STATUS_STYLE[r.status] || POP_STATUS_STYLE.PENDING;
+                return `<tr>
+                  <td style="white-space:nowrap">${fmtDate(r.created_at?.split("T")[0] || r.created_at?.slice(0,10))}</td>
+                  <td><span class="badge badge-type">${esc(r.request_type)}</span></td>
+                  <td>${esc(r.store_name)}<br><span style="font-size:11px;color:var(--text-muted)">${esc(r.store_city || "")}${r.store_city && r.store_state ? ", " : ""}${esc(r.store_state || "")}</span></td>
+                  <td style="text-align:center">${r.quantity}</td>
+                  <td>
+                    <span class="badge ${s.badge}">${s.label}</span>
+                    ${r.admin_note ? `<br><span style="font-size:10px;color:var(--text-muted)">${esc(r.admin_note)}</span>` : ""}
+                  </td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table></div>`}`;
+
+    lucide.createIcons();
+
+    // Store autofill from datalist selection
+    window._popStores = stores;
+
+    document.getElementById("pop-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById("pop-submit-btn");
+      const activeType = document.querySelector(".claim-type-btn.active[data-pop-type]")?.dataset.popType;
+      if (!activeType) { showToast("Select a request type.", "error"); return; }
+      const storeName = document.getElementById("pop-store").value.trim();
+      if (!storeName) { showToast("Store name is required.", "error"); return; }
+      btn.disabled = true; btn.lastChild.textContent = " Submitting...";
+      try {
+        await api("/api/pop-requests", { method: "POST", body: {
+          request_type: activeType,
+          store_name: storeName,
+          store_city: document.getElementById("pop-city").value.trim(),
+          store_state: document.getElementById("pop-state").value,
+          quantity: parseInt(document.getElementById("pop-qty").value, 10) || 1,
+          notes: document.getElementById("pop-notes").value.trim(),
+        }});
+        showToast("Request submitted ✓", "success");
+        renderRepRequests();
+      } catch (err) { showToast(err.message, "error"); btn.disabled = false; btn.lastChild.textContent = " Submit Request"; }
+    });
+
+  } catch (err) { showToast(err.message, "error"); }
+}
+
+window.selectPopType = function(el) {
+  document.querySelectorAll(".claim-type-btn[data-pop-type]").forEach(b => b.classList.remove("active"));
+  el.classList.add("active");
+};
+
+window.autofillPopStore = function(input) {
+  const stores = window._popStores || [];
+  const match = stores.find(s => s.store_name.toLowerCase() === input.value.toLowerCase());
+  if (match) {
+    const cityEl = document.getElementById("pop-city");
+    const stateEl = document.getElementById("pop-state");
+    if (cityEl && match.store_city) cityEl.value = match.store_city;
+    if (stateEl && match.store_state) stateEl.value = match.store_state;
+  }
+};
+
+/* ── Admin: POP / Sample Requests ───────────────────────────── */
+async function renderAdminRequests() {
+  const content = document.getElementById("admin-content");
+  try {
+    const [requests, stats] = await Promise.all([
+      api("/api/pop-requests"),
+      api("/api/pop-requests/admin-stats").catch(() => ({ total:0, pending:0, in_progress:0, fulfilled:0, declined:0 })),
+    ]);
+
+    content.innerHTML = `
+      <div class="stats-grid" style="margin-bottom:var(--sp-6)">
+        <div class="stat-card"><div class="stat-label">Pending</div><div class="stat-value" style="color:var(--pending)">${stats.pending || 0}</div></div>
+        <div class="stat-card"><div class="stat-label">In Progress</div><div class="stat-value teal">${stats.in_progress || 0}</div></div>
+        <div class="stat-card"><div class="stat-label">Fulfilled</div><div class="stat-value green">${stats.fulfilled || 0}</div></div>
+        <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value">${stats.total || 0}</div></div>
+      </div>
+      <div class="section-header" style="margin-bottom:var(--sp-4)"><h3>POP &amp; Sample Requests</h3></div>
+      ${requests.length === 0
+        ? `<div class="empty-state"><i data-lucide="package" style="width:48px;height:48px"></i><h4>No requests yet</h4><p>Requests from reps will appear here.</p></div>`
+        : `<div class="table-wrapper"><table class="claims-table">
+            <thead><tr><th>Date</th><th>Rep</th><th>Distributor</th><th>Type</th><th>Store</th><th>Qty</th><th>Notes</th><th>Status</th><th>Action</th></tr></thead>
+            <tbody>
+              ${requests.map(r => {
+                const s = POP_STATUS_STYLE[r.status] || POP_STATUS_STYLE.PENDING;
+                return `<tr>
+                  <td style="white-space:nowrap">${fmtDate(r.created_at?.split("T")[0] || r.created_at?.slice(0,10))}</td>
+                  <td><strong>${esc(r.rep_name)}</strong><br><span style="font-size:11px;color:var(--text-muted)">${esc(r.rep_email)}</span></td>
+                  <td>${esc(r.distributor_name)}</td>
+                  <td><span class="badge badge-type">${esc(r.request_type)}</span></td>
+                  <td>${esc(r.store_name)}<br><span style="font-size:11px;color:var(--text-muted)">${esc(r.store_city || "")}${r.store_city && r.store_state ? ", " : ""}${esc(r.store_state || "")}</span></td>
+                  <td style="text-align:center">${r.quantity}</td>
+                  <td style="max-width:160px;font-size:12px;color:var(--text-muted)">${esc(r.notes || "—")}</td>
+                  <td>
+                    <span class="badge ${s.badge}">${s.label}</span>
+                    ${r.admin_note ? `<br><span style="font-size:10px;color:var(--text-muted)">${esc(r.admin_note)}</span>` : ""}
+                  </td>
+                  <td>
+                    ${r.status !== "FULFILLED" && r.status !== "DECLINED" ? `
+                    <div class="claim-actions">
+                      ${r.status === "PENDING" ? `<button class="btn btn-secondary btn-sm" onclick="updatePopRequest('${r.id}','IN_PROGRESS')">In Progress</button>` : ""}
+                      ${r.status !== "FULFILLED" ? `<button class="btn btn-success btn-sm" onclick="updatePopRequest('${r.id}','FULFILLED')">Fulfill</button>` : ""}
+                      <button class="btn btn-danger btn-sm" onclick="declinePopRequestPrompt('${r.id}')">Decline</button>
+                    </div>` : "—"}
+                  </td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table></div>`}`;
+
+    lucide.createIcons();
+  } catch (err) { showToast(err.message, "error"); }
+}
+
+window.updatePopRequest = async function(id, status, adminNote) {
+  try {
+    await api(`/api/pop-requests/${id}`, { method: "PUT", body: { status, admin_note: adminNote || null } });
+    showToast(status === "FULFILLED" ? "Marked as fulfilled ✓" : "Status updated", "success");
+    renderAdminRequests();
+  } catch (err) { showToast(err.message, "error"); }
+};
+
+window.declinePopRequestPrompt = function(id) {
+  const modal = document.createElement("div"); modal.className = "modal-overlay";
+  modal.innerHTML = `<div class="modal-card"><h3>Decline Request</h3>
+    <div class="form-group"><label>Reason (optional)</label><input type="text" class="form-input" id="decline-note" placeholder="e.g. Out of stock, check back next month"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+      <button class="btn btn-danger" onclick="updatePopRequest('${id}','DECLINED',document.getElementById('decline-note')?.value);this.closest('.modal-overlay').remove()">Decline</button>
+    </div></div>`;
+  document.body.appendChild(modal);
+};
+
 /* ── Init ───────────────────────────────────────────────────── */
 render();
+
+/* ── Rep Notes ───────────────────────────────────────────────── */
+let _scratchpadTimer = null;
+
+async function renderRepNotes() {
+  app.innerHTML = `${headerHTML()}<main class="app-main has-bottom-nav"><div class="loading-spinner"><div class="spinner"></div></div></main>${repNavHTML("notes")}`;
+  lucide.createIcons();
+  try {
+    const [scratch, notesData] = await Promise.all([
+      api("/api/notes/scratchpad"),
+      api("/api/notes/stores"),
+    ]);
+
+    const notes  = notesData.notes  || [];
+    const stores = notesData.stores || [];
+
+    // Group store notes by store_name
+    const byStore = {};
+    for (const n of notes) {
+      if (!byStore[n.store_name]) byStore[n.store_name] = [];
+      byStore[n.store_name].push(n);
+    }
+    const storeNames = Object.keys(byStore).sort();
+
+    // Active store filter
+    const activeStore = state.notesStoreFilter || null;
+    const storeListId = "notes-store-datalist";
+
+    const main = app.querySelector(".app-main");
+    main.innerHTML = `
+      <div class="section-header" style="margin-bottom:var(--sp-5)">
+        <h3>Notes</h3>
+      </div>
+
+      <!-- Scratchpad -->
+      <div class="notes-section-card">
+        <div class="notes-section-label">
+          <i data-lucide="pencil-line" style="width:15px;height:15px"></i>
+          General Scratchpad
+          <span id="scratch-status" class="scratch-status"></span>
+        </div>
+        <textarea
+          id="scratchpad-area"
+          class="form-input scratchpad-textarea"
+          placeholder="Quick thoughts, follow-ups, anything on your mind…"
+          rows="5"
+        >${esc(scratch.content || "")}</textarea>
+      </div>
+
+      <!-- Store Notes -->
+      <div class="notes-section-card" style="margin-top:var(--sp-5)">
+        <div class="notes-section-label">
+          <i data-lucide="store" style="width:15px;height:15px"></i>
+          Account Notes
+        </div>
+
+        <!-- Add note form -->
+        <div class="store-note-add-row">
+          <datalist id="${storeListId}">
+            ${stores.map(s => `<option value="${esc(s)}"></option>`).join("")}
+          </datalist>
+          <input type="text" class="form-input" id="note-store-input"
+            placeholder="Store name" list="${storeListId}"
+            style="flex:1;min-width:0">
+          <textarea class="form-input" id="note-text-input"
+            placeholder="Note…" rows="2"
+            style="flex:2;min-width:0;resize:vertical;min-height:60px"></textarea>
+          <button class="btn btn-primary btn-sm" style="align-self:flex-end" onclick="addStoreNote()">
+            <i data-lucide="plus" style="width:14px;height:14px"></i> Add
+          </button>
+        </div>
+
+        <!-- Filter pills -->
+        ${storeNames.length > 0 ? `
+        <div class="store-filter-row" id="store-filter-row">
+          <button class="store-pill ${!activeStore ? "active" : ""}" onclick="filterNoteStore(null)">All</button>
+          ${storeNames.map(s => `
+            <button class="store-pill ${activeStore === s ? "active" : ""}" onclick="filterNoteStore(${JSON.stringify(s)})">
+              ${esc(s)} <span class="store-pill-count">${byStore[s].length}</span>
+            </button>`).join("")}
+        </div>` : ""}
+
+        <!-- Notes log -->
+        <div id="store-notes-log">
+          ${storeNames.length === 0
+            ? `<div style="text-align:center;padding:var(--sp-6);color:var(--text-muted);font-size:13px">No account notes yet — add one above.</div>`
+            : (activeStore ? [activeStore] : storeNames).map(store => `
+              <div class="store-note-group">
+                <div class="store-note-group-header">
+                  <i data-lucide="store" style="width:13px;height:13px"></i>
+                  ${esc(store)}
+                  <span class="store-pill-count" style="margin-left:var(--sp-2)">${byStore[store].length}</span>
+                </div>
+                ${byStore[store].map(n => `
+                  <div class="store-note-entry" id="note-${n.id}">
+                    <div class="store-note-text">${esc(n.note)}</div>
+                    <div class="store-note-meta">
+                      <span>${fmtNoteDate(n.created_at)}</span>
+                      <button class="btn-icon-sm" onclick="deleteStoreNote('${n.id}')" title="Delete note">
+                        <i data-lucide="trash-2" style="width:12px;height:12px"></i>
+                      </button>
+                    </div>
+                  </div>`).join("")}
+              </div>`).join("")}
+        </div>
+      </div>`;
+
+    lucide.createIcons();
+
+    // Scratchpad autosave
+    document.getElementById("scratchpad-area").addEventListener("input", function() {
+      const status = document.getElementById("scratch-status");
+      if (status) { status.textContent = "saving…"; status.className = "scratch-status saving"; }
+      clearTimeout(_scratchpadTimer);
+      _scratchpadTimer = setTimeout(async () => {
+        try {
+          await api("/api/notes/scratchpad", { method: "PUT", body: { content: this.value } });
+          const s = document.getElementById("scratch-status");
+          if (s) { s.textContent = "saved"; s.className = "scratch-status saved"; setTimeout(() => { if(s) s.textContent = ""; }, 2000); }
+        } catch { /* silent */ }
+      }, 800);
+    });
+
+  } catch (err) { showToast(err.message, "error"); }
+}
+
+function fmtNoteDate(d) {
+  if (!d) return "";
+  const dt = new Date(d.includes("T") ? d : d + "Z");
+  return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
+    " · " + dt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
+window.filterNoteStore = function(store) {
+  state.notesStoreFilter = store;
+  renderRepNotes();
+};
+
+window.addStoreNote = async function() {
+  const storeName = document.getElementById("note-store-input")?.value.trim();
+  const noteText  = document.getElementById("note-text-input")?.value.trim();
+  if (!storeName) { showToast("Store name required.", "error"); return; }
+  if (!noteText)  { showToast("Note cannot be empty.", "error"); return; }
+  try {
+    await api("/api/notes/stores", { method: "POST", body: { store_name: storeName, note: noteText } });
+    state.notesStoreFilter = storeName;
+    renderRepNotes();
+  } catch (err) { showToast(err.message, "error"); }
+};
+
+window.deleteStoreNote = async function(id) {
+  try {
+    await api(`/api/notes/stores/${id}`, { method: "DELETE" });
+    renderRepNotes();
+  } catch (err) { showToast(err.message, "error"); }
+};
+
+/* ── Admin Notes ─────────────────────────────────────────────── */
+async function renderAdminNotes() {
+  const content = document.getElementById("admin-content");
+  try {
+    const data = await api("/api/notes/admin");
+    const scratchpads  = data.scratchpads  || [];
+    const storeNotes   = data.store_notes  || [];
+
+    // Group store notes by rep
+    const notesByRep = {};
+    for (const n of storeNotes) {
+      const key = n.user_id;
+      if (!notesByRep[key]) notesByRep[key] = { rep_name: n.rep_name, distributor_name: n.distributor_name, notes: [] };
+      notesByRep[key].notes.push(n);
+    }
+    const repIds = Object.keys(notesByRep);
+
+    content.innerHTML = `
+      <div class="section-header" style="margin-bottom:var(--sp-6)"><h3>Rep Notes</h3></div>
+
+      <!-- Scratchpads -->
+      <h4 class="admin-notes-section-title">General Scratchpads</h4>
+      ${scratchpads.length === 0
+        ? `<p style="color:var(--text-muted);font-size:13px;margin-bottom:var(--sp-6)">No scratchpad content yet.</p>`
+        : scratchpads.map(s => `
+          <div class="admin-note-card">
+            <div class="admin-note-card-header">
+              <strong>${esc(s.rep_name)}</strong>
+              <span style="color:var(--text-muted);font-size:12px">${esc(s.distributor_name || "")}</span>
+              <span style="color:var(--text-muted);font-size:11px;margin-left:auto">Updated ${fmtNoteDate(s.updated_at)}</span>
+            </div>
+            <div class="admin-note-card-body">${esc(s.content)}</div>
+          </div>`).join("")}
+
+      <!-- Store Notes by rep -->
+      <h4 class="admin-notes-section-title" style="margin-top:var(--sp-6)">Account Notes</h4>
+      ${repIds.length === 0
+        ? `<p style="color:var(--text-muted);font-size:13px">No account notes yet.</p>`
+        : repIds.map(uid => {
+            const rep = notesByRep[uid];
+            const byStore = {};
+            for (const n of rep.notes) {
+              if (!byStore[n.store_name]) byStore[n.store_name] = [];
+              byStore[n.store_name].push(n);
+            }
+            return `
+              <div class="admin-note-card">
+                <div class="admin-note-card-header">
+                  <strong>${esc(rep.rep_name)}</strong>
+                  <span style="color:var(--text-muted);font-size:12px">${esc(rep.distributor_name || "")}</span>
+                  <span style="color:var(--text-muted);font-size:11px;margin-left:auto">${rep.notes.length} note${rep.notes.length !== 1 ? "s" : ""}</span>
+                </div>
+                ${Object.entries(byStore).map(([store, notes]) => `
+                  <div class="store-note-group" style="margin:var(--sp-3) 0 0">
+                    <div class="store-note-group-header">
+                      <i data-lucide="store" style="width:13px;height:13px"></i> ${esc(store)}
+                    </div>
+                    ${notes.map(n => `
+                      <div class="store-note-entry">
+                        <div class="store-note-text">${esc(n.note)}</div>
+                        <div class="store-note-meta"><span>${fmtNoteDate(n.created_at)}</span></div>
+                      </div>`).join("")}
+                  </div>`).join("")}
+              </div>`;
+          }).join("")}`;
+
+    lucide.createIcons();
+  } catch (err) { showToast(err.message, "error"); }
+}

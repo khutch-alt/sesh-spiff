@@ -316,6 +316,9 @@ async def lifespan(app):
     db = get_db()
     init_db(db)
     seed_data(db)
+    _ensure_pop_requests_table(db)
+    _ensure_door_lists_table(db)
+    _ensure_notes_tables(db)
     db.close()
     yield
 
@@ -1145,3 +1148,593 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
+# ── POP / Sample Requests ───────────────────────────────────────────
+POP_REQUEST_TYPES = [
+    "POP Display",
+    "Shelf Talker",
+    "Product Samples",
+    "Counter Display",
+    "Window Cling",
+    "Door Strike",
+]
+
+def _ensure_pop_requests_table(db):
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS pop_requests (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            distributor_id TEXT NOT NULL,
+            request_type TEXT NOT NULL,
+            store_name TEXT NOT NULL,
+            store_city TEXT,
+            store_state TEXT,
+            quantity INTEGER NOT NULL DEFAULT 1,
+            notes TEXT,
+            status TEXT NOT NULL DEFAULT 'PENDING'
+                CHECK(status IN ('PENDING', 'IN_PROGRESS', 'FULFILLED', 'DECLINED')),
+            admin_note TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (distributor_id) REFERENCES distributors(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pop_user ON pop_requests(user_id);
+        CREATE INDEX IF NOT EXISTS idx_pop_status ON pop_requests(status);
+    """)
+    db.commit()
+
+# POP table is created at startup via the module-level call below
+# (called once when the module loads so the table exists immediately)
+
+class PopRequestCreate(BaseModel):
+    request_type: str
+    store_name: str
+    store_city: Optional[str] = ""
+    store_state: Optional[str] = ""
+    quantity: int = 1
+    notes: Optional[str] = ""
+
+class PopRequestUpdate(BaseModel):
+    status: str
+    admin_note: Optional[str] = None
+
+@app.get("/api/pop-request-types")
+def list_pop_request_types(user=Depends(get_current_user)):
+    return POP_REQUEST_TYPES
+
+@app.post("/api/pop-requests")
+def create_pop_request(req: PopRequestCreate, user=Depends(get_current_user)):
+    if user["role"] != "rep":
+        raise HTTPException(status_code=403, detail="Only reps can submit POP requests")
+    if req.request_type not in POP_REQUEST_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid request type")
+    if req.quantity < 1:
+        raise HTTPException(status_code=400, detail="Quantity must be at least 1")
+    db = get_db()
+    req_id = str(uuid.uuid4())
+    db.execute(
+        """INSERT INTO pop_requests
+           (id, user_id, distributor_id, request_type, store_name, store_city, store_state, quantity, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (req_id, user["id"], user["distributor_id"], req.request_type,
+         req.store_name.strip(), req.store_city.strip(), req.store_state.strip(),
+         req.quantity, req.notes.strip() if req.notes else "")
+    )
+    db.commit()
+    row = db.execute("SELECT * FROM pop_requests WHERE id = ?", (req_id,)).fetchone()
+    db.close()
+    return dict(row)
+
+@app.get("/api/pop-requests")
+def list_pop_requests(user=Depends(get_current_user)):
+    db = get_db()
+    if user["role"] == "admin":
+        rows = db.execute("""
+            SELECT p.*, u.name as rep_name, u.email as rep_email, d.name as distributor_name
+            FROM pop_requests p
+            JOIN users u ON p.user_id = u.id
+            JOIN distributors d ON p.distributor_id = d.id
+            ORDER BY p.created_at DESC
+        """).fetchall()
+    else:
+        rows = db.execute("""
+            SELECT p.*, u.name as rep_name, u.email as rep_email, d.name as distributor_name
+            FROM pop_requests p
+            JOIN users u ON p.user_id = u.id
+            JOIN distributors d ON p.distributor_id = d.id
+            WHERE p.user_id = ?
+            ORDER BY p.created_at DESC
+        """, (user["id"],)).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+@app.put("/api/pop-requests/{req_id}")
+def update_pop_request(req_id: str, req: PopRequestUpdate, user=Depends(get_current_user)):
+    require_admin(user)
+    valid = ("PENDING", "IN_PROGRESS", "FULFILLED", "DECLINED")
+    if req.status not in valid:
+        raise HTTPException(status_code=400, detail=f"Status must be one of {valid}")
+    db = get_db()
+    row = db.execute("SELECT * FROM pop_requests WHERE id = ?", (req_id,)).fetchone()
+    if not row:
+        db.close()
+        raise HTTPException(status_code=404, detail="Request not found")
+    db.execute(
+        "UPDATE pop_requests SET status = ?, admin_note = ?, updated_at = datetime('now') WHERE id = ?",
+        (req.status, req.admin_note, req_id)
+    )
+    db.commit()
+    updated = db.execute("""
+        SELECT p.*, u.name as rep_name, u.email as rep_email, d.name as distributor_name
+        FROM pop_requests p JOIN users u ON p.user_id = u.id JOIN distributors d ON p.distributor_id = d.id
+        WHERE p.id = ?""", (req_id,)).fetchone()
+    db.close()
+    return dict(updated)
+
+@app.get("/api/pop-requests/admin-stats")
+def pop_admin_stats(user=Depends(get_current_user)):
+    require_admin(user)
+    db = get_db()
+    stats = db.execute("""
+        SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN status='PENDING' THEN 1 ELSE 0 END) as pending,
+            SUM(CASE WHEN status='IN_PROGRESS' THEN 1 ELSE 0 END) as in_progress,
+            SUM(CASE WHEN status='FULFILLED' THEN 1 ELSE 0 END) as fulfilled,
+            SUM(CASE WHEN status='DECLINED' THEN 1 ELSE 0 END) as declined
+        FROM pop_requests
+    """).fetchone()
+    db.close()
+    return dict(stats)
+
+# ── Rep store history (for autocomplete) ───────────────────────────
+@app.get("/api/my-stores")
+def my_stores(user=Depends(get_current_user)):
+    """Return distinct stores from this rep's past claims for autocomplete."""
+    if user["role"] != "rep":
+        return []
+    db = get_db()
+    rows = db.execute("""
+        SELECT DISTINCT store_name, store_city, store_state
+        FROM claims
+        WHERE user_id = ?
+        ORDER BY store_name ASC
+        LIMIT 100
+    """, (user["id"],)).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+# ── Door Lists ──────────────────────────────────────────────────────
+DOOR_LIST_BONUS_AMOUNT = 10.0
+DOOR_LIST_BONUS_NAME = "Door List Submission Bonus"
+
+def _ensure_door_lists_table(db):
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS rep_doors (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            distributor_id TEXT NOT NULL,
+            door_type TEXT NOT NULL CHECK(door_type IN ('ACTIVE', 'TARGET')),
+            store_name TEXT NOT NULL,
+            store_city TEXT,
+            store_state TEXT,
+            verified INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (distributor_id) REFERENCES distributors(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_doors_user ON rep_doors(user_id);
+        CREATE INDEX IF NOT EXISTS idx_doors_type ON rep_doors(door_type);
+
+        CREATE TABLE IF NOT EXISTS rep_door_bonus (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL UNIQUE,
+            distributor_id TEXT NOT NULL,
+            claim_id TEXT,
+            paid_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+    """)
+    db.commit()
+
+
+# ── Door List Models ────────────────────────────────────────────────
+class DoorEntry(BaseModel):
+    door_type: str   # "ACTIVE" | "TARGET"
+    store_name: str
+    store_city: Optional[str] = ""
+    store_state: Optional[str] = ""
+
+class DoorBulkCreate(BaseModel):
+    doors: List[DoorEntry]
+
+class DoorVerifyRequest(BaseModel):
+    verified: bool
+
+# ── Door List Endpoints ─────────────────────────────────────────────
+
+def _check_and_award_door_bonus(db, user_id: str, distributor_id: str):
+    """Award $10 bonus once both ACTIVE and TARGET lists have ≥1 door. Idempotent."""
+    already = db.execute("SELECT id FROM rep_door_bonus WHERE user_id = ?", (user_id,)).fetchone()
+    if already:
+        return None  # Already awarded
+
+    has_active = db.execute(
+        "SELECT 1 FROM rep_doors WHERE user_id = ? AND door_type = 'ACTIVE' LIMIT 1", (user_id,)
+    ).fetchone()
+    has_target = db.execute(
+        "SELECT 1 FROM rep_doors WHERE user_id = ? AND door_type = 'TARGET' LIMIT 1", (user_id,)
+    ).fetchone()
+
+    if not (has_active and has_target):
+        return None
+
+    # Find or create DOOR_LIST_BONUS claim type (inactive, internal use)
+    ct = db.execute("SELECT id FROM claim_types WHERE name = 'DOOR_LIST_BONUS'").fetchone()
+    if not ct:
+        ct_id = str(uuid.uuid4())
+        db.execute(
+            """INSERT INTO claim_types (id, name, label, description, base_payout, is_active, sort_order, icon)
+               VALUES (?, 'DOOR_LIST_BONUS', 'Door List Bonus', 'One-time bonus for submitting active + target door lists', ?, 0, 99, '🗺️')""",
+            (ct_id, DOOR_LIST_BONUS_AMOUNT)
+        )
+        ct_id_val = ct_id
+    else:
+        ct_id_val = ct["id"]
+
+    # Check distributor fund
+    dist = db.execute("SELECT * FROM distributors WHERE id = ?", (distributor_id,)).fetchone()
+    if not dist or dist["current_fund_balance"] < DOOR_LIST_BONUS_AMOUNT:
+        return None  # Silently skip if insufficient funds
+
+    # Create the claim
+    claim_id = str(uuid.uuid4())
+    db.execute(
+        """INSERT INTO claims (id, user_id, distributor_id, claim_type_id, store_name, order_date,
+           rolls_count, payout_amount, status, bonus_applied)
+           VALUES (?, ?, ?, ?, 'Door List Submission', date('now'), 0, ?, 'APPROVED', ?)""",
+        (claim_id, user_id, distributor_id, ct_id_val, DOOR_LIST_BONUS_AMOUNT, DOOR_LIST_BONUS_NAME)
+    )
+    db.execute(
+        "UPDATE distributors SET current_fund_balance = current_fund_balance - ?, updated_at = datetime('now') WHERE id = ?",
+        (DOOR_LIST_BONUS_AMOUNT, distributor_id)
+    )
+    # Record bonus awarded
+    bonus_id = str(uuid.uuid4())
+    db.execute(
+        "INSERT INTO rep_door_bonus (id, user_id, distributor_id, claim_id) VALUES (?, ?, ?, ?)",
+        (bonus_id, user_id, distributor_id, claim_id)
+    )
+    db.commit()
+    return claim_id
+
+
+@app.post("/api/doors")
+def add_doors(req: DoorBulkCreate, user=Depends(get_current_user)):
+    if user["role"] != "rep":
+        raise HTTPException(status_code=403, detail="Reps only")
+    if not req.doors:
+        raise HTTPException(status_code=400, detail="No doors provided")
+    for d in req.doors:
+        if d.door_type not in ("ACTIVE", "TARGET"):
+            raise HTTPException(status_code=400, detail=f"Invalid door_type: {d.door_type}")
+        if not d.store_name.strip():
+            raise HTTPException(status_code=400, detail="Store name required")
+
+    db = get_db()
+    inserted = 0
+    skipped = 0
+    for d in req.doors:
+        # Deduplicate by user + type + store name (case-insensitive)
+        existing = db.execute(
+            "SELECT id FROM rep_doors WHERE user_id = ? AND door_type = ? AND LOWER(store_name) = LOWER(?)",
+            (user["id"], d.door_type, d.store_name.strip())
+        ).fetchone()
+        if existing:
+            skipped += 1
+            continue
+        door_id = str(uuid.uuid4())
+        db.execute(
+            "INSERT INTO rep_doors (id, user_id, distributor_id, door_type, store_name, store_city, store_state) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (door_id, user["id"], user["distributor_id"], d.door_type,
+             d.store_name.strip(), (d.store_city or "").strip(), (d.store_state or "").strip())
+        )
+        inserted += 1
+
+    db.commit()
+    bonus_claim_id = _check_and_award_door_bonus(db, user["id"], user["distributor_id"])
+    db.close()
+    return {
+        "inserted": inserted,
+        "skipped": skipped,
+        "bonus_awarded": bonus_claim_id is not None,
+        "bonus_amount": DOOR_LIST_BONUS_AMOUNT if bonus_claim_id else 0,
+    }
+
+
+@app.get("/api/doors/me")
+def my_doors(user=Depends(get_current_user)):
+    if user["role"] != "rep":
+        raise HTTPException(status_code=403, detail="Reps only")
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM rep_doors WHERE user_id = ? ORDER BY door_type, store_name",
+        (user["id"],)
+    ).fetchall()
+    bonus = db.execute("SELECT * FROM rep_door_bonus WHERE user_id = ?", (user["id"],)).fetchone()
+    db.close()
+    return {
+        "doors": [dict(r) for r in rows],
+        "bonus_earned": bonus is not None,
+        "active_count": sum(1 for r in rows if r["door_type"] == "ACTIVE"),
+        "target_count": sum(1 for r in rows if r["door_type"] == "TARGET"),
+    }
+
+
+@app.get("/api/doors/admin")
+def admin_doors(
+    user_id: Optional[str] = None,
+    distributor_id: Optional[str] = None,
+    door_type: Optional[str] = None,
+    user=Depends(get_current_user)
+):
+    require_admin(user)
+    db = get_db()
+    q = """
+        SELECT d.*, u.name as rep_name, u.email as rep_email, dist.name as distributor_name
+        FROM rep_doors d
+        JOIN users u ON d.user_id = u.id
+        JOIN distributors dist ON d.distributor_id = dist.id
+        WHERE 1=1
+    """
+    params = []
+    if user_id:  q += " AND d.user_id = ?";        params.append(user_id)
+    if distributor_id: q += " AND d.distributor_id = ?"; params.append(distributor_id)
+    if door_type: q += " AND d.door_type = ?";     params.append(door_type)
+    q += " ORDER BY dist.name, u.name, d.door_type, d.store_name"
+    rows = db.execute(q, params).fetchall()
+
+    # Summary per rep
+    summary = db.execute("""
+        SELECT d.user_id, u.name as rep_name, dist.name as distributor_name,
+            SUM(CASE WHEN d.door_type='ACTIVE' THEN 1 ELSE 0 END) as active_count,
+            SUM(CASE WHEN d.door_type='TARGET' THEN 1 ELSE 0 END) as target_count,
+            SUM(CASE WHEN d.verified=1 THEN 1 ELSE 0 END) as verified_count,
+            b.id IS NOT NULL as bonus_earned
+        FROM rep_doors d
+        JOIN users u ON d.user_id = u.id
+        JOIN distributors dist ON d.distributor_id = dist.id
+        LEFT JOIN rep_door_bonus b ON b.user_id = d.user_id
+        GROUP BY d.user_id, u.name, dist.name, b.id
+        ORDER BY dist.name, u.name
+    """).fetchall()
+
+    db.close()
+    return {
+        "doors": [dict(r) for r in rows],
+        "summary": [dict(r) for r in summary],
+    }
+
+
+@app.get("/api/doors/export")
+def export_doors(user=Depends(get_current_user)):
+    require_admin(user)
+    db = get_db()
+    rows = db.execute("""
+        SELECT d.door_type, d.store_name, d.store_city, d.store_state,
+               d.verified, d.created_at,
+               u.name as rep_name, u.email as rep_email, dist.name as distributor_name
+        FROM rep_doors d
+        JOIN users u ON d.user_id = u.id
+        JOIN distributors dist ON d.distributor_id = dist.id
+        ORDER BY dist.name, u.name, d.door_type, d.store_name
+    """).fetchall()
+    db.close()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Type","Store Name","City","State","Verified","Rep Name","Rep Email","Distributor","Submitted"])
+    for r in rows:
+        writer.writerow([
+            r["door_type"], r["store_name"], r["store_city"] or "", r["store_state"] or "",
+            "Yes" if r["verified"] else "No",
+            r["rep_name"], r["rep_email"], r["distributor_name"], r["created_at"]
+        ])
+    output.seek(0)
+    return StreamingResponse(
+        output, media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=sesh_doors_{datetime.now().strftime('%Y%m%d')}.csv"}
+    )
+
+
+@app.put("/api/doors/{door_id}/verify")
+def verify_door(door_id: str, req: DoorVerifyRequest, user=Depends(get_current_user)):
+    require_admin(user)
+    db = get_db()
+    row = db.execute("SELECT id FROM rep_doors WHERE id = ?", (door_id,)).fetchone()
+    if not row:
+        db.close()
+        raise HTTPException(status_code=404, detail="Door not found")
+    db.execute("UPDATE rep_doors SET verified = ? WHERE id = ?", (1 if req.verified else 0, door_id))
+    db.commit()
+    db.close()
+    return {"id": door_id, "verified": req.verified}
+
+
+@app.delete("/api/doors/{door_id}")
+def delete_door(door_id: str, user=Depends(get_current_user)):
+    if user["role"] != "rep":
+        raise HTTPException(status_code=403, detail="Reps only")
+    db = get_db()
+    row = db.execute("SELECT id FROM rep_doors WHERE id = ? AND user_id = ?", (door_id, user["id"])).fetchone()
+    if not row:
+        db.close()
+        raise HTTPException(status_code=404, detail="Door not found")
+    db.execute("DELETE FROM rep_doors WHERE id = ?", (door_id,))
+    db.commit()
+    db.close()
+    return {"deleted": door_id}
+
+# ── Notes ───────────────────────────────────────────────────────────
+
+def _ensure_notes_tables(db):
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS rep_scratchpad (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL UNIQUE,
+            content TEXT NOT NULL DEFAULT '',
+            updated_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS store_notes (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            store_name TEXT NOT NULL,
+            note TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_store_notes_user ON store_notes(user_id);
+        CREATE INDEX IF NOT EXISTS idx_store_notes_store ON store_notes(user_id, store_name);
+    """)
+    db.commit()
+
+class ScratchpadUpdate(BaseModel):
+    content: str
+
+class StoreNoteCreate(BaseModel):
+    store_name: str
+    note: str
+
+# ── Scratchpad ──────────────────────────────────────────────────────
+@app.get("/api/notes/scratchpad")
+def get_scratchpad(user=Depends(get_current_user)):
+    if user["role"] != "rep":
+        raise HTTPException(status_code=403, detail="Reps only")
+    db = get_db()
+    _ensure_notes_tables(db)
+    row = db.execute("SELECT * FROM rep_scratchpad WHERE user_id = ?", (user["id"],)).fetchone()
+    db.close()
+    return {"content": row["content"] if row else ""}
+
+@app.put("/api/notes/scratchpad")
+def save_scratchpad(req: ScratchpadUpdate, user=Depends(get_current_user)):
+    if user["role"] != "rep":
+        raise HTTPException(status_code=403, detail="Reps only")
+    db = get_db()
+    _ensure_notes_tables(db)
+    existing = db.execute("SELECT id FROM rep_scratchpad WHERE user_id = ?", (user["id"],)).fetchone()
+    if existing:
+        db.execute(
+            "UPDATE rep_scratchpad SET content = ?, updated_at = datetime('now') WHERE user_id = ?",
+            (req.content, user["id"])
+        )
+    else:
+        db.execute(
+            "INSERT INTO rep_scratchpad (id, user_id, content) VALUES (?, ?, ?)",
+            (str(uuid.uuid4()), user["id"], req.content)
+        )
+    db.commit()
+    db.close()
+    return {"saved": True}
+
+# ── Store Notes ─────────────────────────────────────────────────────
+@app.get("/api/notes/stores")
+def get_store_notes(user=Depends(get_current_user)):
+    """Return all store notes for this rep, plus list of stores they can add notes to."""
+    if user["role"] != "rep":
+        raise HTTPException(status_code=403, detail="Reps only")
+    db = get_db()
+    _ensure_notes_tables(db)
+
+    # All notes for this rep
+    notes = db.execute(
+        "SELECT * FROM store_notes WHERE user_id = ? ORDER BY created_at DESC",
+        (user["id"],)
+    ).fetchall()
+
+    # Unique store names from claims + door list for the picker
+    claim_stores = db.execute(
+        "SELECT DISTINCT store_name FROM claims WHERE user_id = ? ORDER BY store_name",
+        (user["id"],)
+    ).fetchall()
+    door_stores = db.execute(
+        "SELECT DISTINCT store_name FROM rep_doors WHERE user_id = ? ORDER BY store_name",
+        (user["id"],)
+    ).fetchall()
+
+    all_stores = sorted({r["store_name"] for r in list(claim_stores) + list(door_stores)})
+    db.close()
+
+    return {
+        "notes": [dict(r) for r in notes],
+        "stores": all_stores,
+    }
+
+@app.post("/api/notes/stores")
+def add_store_note(req: StoreNoteCreate, user=Depends(get_current_user)):
+    if user["role"] != "rep":
+        raise HTTPException(status_code=403, detail="Reps only")
+    if not req.store_name.strip():
+        raise HTTPException(status_code=400, detail="Store name required")
+    if not req.note.strip():
+        raise HTTPException(status_code=400, detail="Note cannot be empty")
+    db = get_db()
+    _ensure_notes_tables(db)
+    note_id = str(uuid.uuid4())
+    db.execute(
+        "INSERT INTO store_notes (id, user_id, store_name, note) VALUES (?, ?, ?, ?)",
+        (note_id, user["id"], req.store_name.strip(), req.note.strip())
+    )
+    db.commit()
+    row = db.execute("SELECT * FROM store_notes WHERE id = ?", (note_id,)).fetchone()
+    db.close()
+    return dict(row)
+
+@app.delete("/api/notes/stores/{note_id}")
+def delete_store_note(note_id: str, user=Depends(get_current_user)):
+    if user["role"] != "rep":
+        raise HTTPException(status_code=403, detail="Reps only")
+    db = get_db()
+    row = db.execute(
+        "SELECT id FROM store_notes WHERE id = ? AND user_id = ?", (note_id, user["id"])
+    ).fetchone()
+    if not row:
+        db.close()
+        raise HTTPException(status_code=404, detail="Note not found")
+    db.execute("DELETE FROM store_notes WHERE id = ?", (note_id,))
+    db.commit()
+    db.close()
+    return {"deleted": note_id}
+
+# ── Admin: read all notes ───────────────────────────────────────────
+@app.get("/api/notes/admin")
+def admin_notes(user=Depends(get_current_user)):
+    require_admin(user)
+    db = get_db()
+    _ensure_notes_tables(db)
+
+    scratchpads = db.execute("""
+        SELECT s.content, s.updated_at, u.name as rep_name, u.id as user_id,
+               d.name as distributor_name
+        FROM rep_scratchpad s
+        JOIN users u ON s.user_id = u.id
+        LEFT JOIN distributors d ON u.distributor_id = d.id
+        WHERE s.content != ''
+        ORDER BY u.name
+    """).fetchall()
+
+    store_notes = db.execute("""
+        SELECT n.*, u.name as rep_name, d.name as distributor_name
+        FROM store_notes n
+        JOIN users u ON n.user_id = u.id
+        LEFT JOIN distributors d ON u.distributor_id = d.id
+        ORDER BY u.name, n.store_name, n.created_at DESC
+    """).fetchall()
+
+    db.close()
+    return {
+        "scratchpads": [dict(r) for r in scratchpads],
+        "store_notes": [dict(r) for r in store_notes],
+    }
