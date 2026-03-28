@@ -1206,30 +1206,6 @@ def create_user(req: UserCreate, user=Depends(get_current_user)):
     db.close()
     return {"id": uid, "email": req.email, "name": req.name, "role": req.role}
 
-# ── Static files ────────────────────────────────────────────────────
-from fastapi.staticfiles import StaticFiles
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
-
-STATIC_DIR = os.path.dirname(__file__)
-
-@app.get("/")
-def serve_index():
-    from fastapi.responses import FileResponse
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
-
-@app.get("/{filename}")
-def serve_static(filename: str):
-    from fastapi.responses import FileResponse
-    filepath = os.path.join(STATIC_DIR, filename)
-    if os.path.isfile(filepath) and not filename.startswith("."):
-        return FileResponse(filepath)
-    raise HTTPException(status_code=404, detail="Not found")
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
-
 # ── POP / Sample Requests ───────────────────────────────────────────
 POP_REQUEST_TYPES = [
     "POP Display",
@@ -1738,3 +1714,27 @@ def admin_notes(user=Depends(get_current_user)):
         "scratchpads": [dict(r) for r in scratchpads],
         "store_notes": [dict(r) for r in store_notes],
     }
+
+# ── Static files ────────────────────────────────────────────────────
+from fastapi.staticfiles import StaticFiles
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
+STATIC_DIR = os.path.dirname(__file__)
+
+@app.get("/")
+def serve_index():
+    from fastapi.responses import FileResponse
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+@app.get("/{filename}")
+def serve_static(filename: str):
+    from fastapi.responses import FileResponse
+    filepath = os.path.join(STATIC_DIR, filename)
+    if os.path.isfile(filepath) and not filename.startswith("."):
+        return FileResponse(filepath)
+    raise HTTPException(status_code=404, detail="Not found")
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
