@@ -351,7 +351,7 @@ function repNavHTML(active) {
 
 /* ── Rep Dashboard ──────────────────────────────────────────── */
 async function renderRepDashboard() {
-  app.innerHTML = `${headerHTML()}<main class="app-main has-bottom-nav"><div class="loading-spinner"><div class="spinner"></div></div></main>${repNavHTML("dashboard")}`;
+  app.innerHTML = `${headerHTML()}${repNavHTML("dashboard")}<main class="app-main has-bottom-nav"><div class="loading-spinner"><div class="spinner"></div></div></main>`;
   lucide.createIcons();
   try {
     const [stats, claims, doorData] = await Promise.all([api("/api/stats/me"), api("/api/claims"), api("/api/doors/me")]);
@@ -380,7 +380,7 @@ async function renderRepDashboard() {
         </div>
         <div class="stat-card">
           <div class="stat-label">Total Earned</div>
-          <div class="stat-value green">${fmtCurrency(stats.total_earned)}</div>
+          <div class="stat-value ${stats.total_earned > 0 ? 'green' : ''}">${fmtCurrency(stats.total_earned)}</div>
           <div class="stat-sub">${stats.approved_claims} approved</div>
           ${milestoneHTML(stats.total_earned)}
         </div>
@@ -449,7 +449,7 @@ window.quickClaim = function() {
 
 /* ── Rep Submit ─────────────────────────────────────────────── */
 async function renderRepSubmit() {
-  app.innerHTML = `${headerHTML()}<main class="app-main has-bottom-nav"><div class="loading-spinner"><div class="spinner"></div></div></main>${repNavHTML("submit")}`;
+  app.innerHTML = `${headerHTML()}${repNavHTML("submit")}<main class="app-main has-bottom-nav"><div class="loading-spinner"><div class="spinner"></div></div></main>`;
   lucide.createIcons();
   try {
     const claimTypes = await api("/api/claim-types");
@@ -563,7 +563,7 @@ window.handleFileSelect = function(input) {
 
 /* ── Leaderboard ────────────────────────────────────────────── */
 async function renderLeaderboard() {
-  app.innerHTML = `${headerHTML()}<main class="app-main has-bottom-nav"><div class="loading-spinner"><div class="spinner"></div></div></main>${repNavHTML("leaderboard")}`;
+  app.innerHTML = `${headerHTML()}${repNavHTML("leaderboard")}<main class="app-main has-bottom-nav"><div class="loading-spinner"><div class="spinner"></div></div></main>`;
   lucide.createIcons();
   try {
     const board = await api("/api/leaderboard");
@@ -1311,7 +1311,7 @@ const POP_STATUS_STYLE = {
 };
 
 async function renderRepRequests() {
-  app.innerHTML = `${headerHTML()}<main class="app-main has-bottom-nav"><div class="loading-spinner"><div class="spinner"></div></div></main>${repNavHTML("requests")}`;
+  app.innerHTML = `${headerHTML()}${repNavHTML("requests")}<main class="app-main has-bottom-nav"><div class="loading-spinner"><div class="spinner"></div></div></main>`;
   lucide.createIcons();
   try {
     const [requests, stores] = await Promise.all([
@@ -1512,7 +1512,7 @@ render();
 let _scratchpadTimer = null;
 
 async function renderRepNotes() {
-  app.innerHTML = `${headerHTML()}<main class="app-main has-bottom-nav"><div class="loading-spinner"><div class="spinner"></div></div></main>${repNavHTML("notes")}`;
+  app.innerHTML = `${headerHTML()}${repNavHTML("notes")}<main class="app-main has-bottom-nav"><div class="loading-spinner"><div class="spinner"></div></div></main>`;
   lucide.createIcons();
   try {
     const [scratch, notesData] = await Promise.all([
