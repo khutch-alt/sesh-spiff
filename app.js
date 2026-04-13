@@ -98,7 +98,11 @@ function fmtCurrency(n) {
 }
 function fmtDate(d) {
   if (!d) return "—";
-  return new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  // Normalize: handle both "2026-04-13T..." and "2026-04-13 ..." formats from DB
+  const normalized = String(d).replace(" ", "T").slice(0, 10);
+  const dt = new Date(normalized + "T00:00:00");
+  if (isNaN(dt.getTime())) return "—";
+  return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 function esc(str) {
   if (!str) return "";
@@ -153,12 +157,12 @@ function milestoneHTML(totalEarned) {
   const milestone = Math.ceil((earned + 0.01) / 50) * 50;
   const progress = Math.min(100, ((earned % 50) / 50) * 100);
   const toNext = milestone - earned;
+  const label = earned === 0
+    ? `First milestone: <strong>${fmtCurrency(milestone)}</strong>`
+    : `Next milestone: <strong>${fmtCurrency(milestone)}</strong> <span class="milestone-to-go">${fmtCurrency(toNext)} to go</span>`;
   return `
     <div class="milestone-wrap">
-      <div class="milestone-label">
-        <span>Next milestone: <strong>${fmtCurrency(milestone)}</strong></span>
-        <span class="milestone-to-go">${fmtCurrency(toNext)} to go</span>
-      </div>
+      <div class="milestone-label" style="font-size:11px;color:var(--text-muted);margin-bottom:var(--sp-2)">${label}</div>
       <div class="fund-meter-bar"><div class="fund-meter-fill" style="width:${progress.toFixed(1)}%"></div></div>
     </div>`;
 }
