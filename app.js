@@ -4,14 +4,25 @@ const API = (location.hostname === "127.0.0.1" || location.hostname === "localho
 
 const app = document.getElementById("app");
 
+// ── Session persistence ─────────────────────────────────────
+const _saved = (() => { try { return JSON.parse(sessionStorage.getItem("sesh_session") || "null"); } catch(e) { return null; } })();
+
 let state = {
-  token: null,
-  user: null,
-  view: "login",
+  token: _saved?.token || null,
+  user:  _saved?.user  || null,
+  view:  _saved?.token ? (_saved?.user?.role === "admin" ? "admin-claims" : "rep-dashboard") : "login",
   loginTab: "signin",
   lbFilter: "my-dist",   // "all" | "my-dist"
   quickClaim: false,
 };
+
+function saveSession() {
+  if (state.token && state.user) {
+    sessionStorage.setItem("sesh_session", JSON.stringify({ token: state.token, user: state.user }));
+  } else {
+    sessionStorage.removeItem("sesh_session");
+  }
+}
 
 /* ── US States ──────────────────────────────────────────────── */
 const US_STATES = [
@@ -265,6 +276,7 @@ function renderLogin() {
         const data = await api("/api/auth/login", { method: "POST", body: { email: document.getElementById("email").value, password: document.getElementById("password").value } });
         state.token = data.token; state.user = data.user;
         state.view = data.user.role === "admin" ? "admin-claims" : "rep-dashboard";
+        saveSession();
         render();
       } catch (err) { showToast(err.message, "error"); btn.disabled = false; btn.textContent = "Sign In"; }
     });
@@ -284,6 +296,7 @@ function renderLogin() {
         }});
         state.token = data.token; state.user = data.user;
         state.view = "rep-dashboard";
+        saveSession();
         showToast(`Welcome to Sesh SPIFF, ${data.user.name}! 🎉`, "success");
         render();
       } catch (err) { showToast(err.message, "error"); btn.disabled = false; btn.textContent = "Create Account"; }
@@ -336,7 +349,7 @@ function headerHTML() {
     </header>`;
 }
 
-window.logout = function() { state = { token: null, user: null, view: "login", loginTab: "signin", lbFilter: "my-dist", quickClaim: false }; render(); };
+window.logout = function() { state = { token: null, user: null, view: "login", loginTab: "signin", lbFilter: "my-dist", quickClaim: false }; saveSession(); render(); };
 window.navigate = function(view) { state.view = view; render(); };
 
 function repNavHTML(active) {
@@ -662,6 +675,8 @@ async function renderAdminDashboard(section) {
   if (section === "claims") await renderAdminClaims();
   else if (section === "requests") await renderAdminRequests();
   else if (section === "funds") await renderAdminFunds();
+  else if (section === "doors") await renderAdminDoors();
+  else if (section === "notes") await renderAdminNotes();
   else if (section === "settings") await renderAdminSettings();
 }
 
