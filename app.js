@@ -424,13 +424,13 @@ async function renderRepDashboard() {
             <i data-lucide="map-pin" style="width:18px;height:18px"></i>
             <div>
               <div style="font-weight:600;font-size:14px">My Door List</div>
-              <div style="font-size:12px;color:var(--text-muted)">${doorData.active_count} active &middot; ${doorData.target_count} target${doorData.bonus_earned ? " &middot; <span style=\'color:#16a34a;font-weight:600\'>$10 bonus earned ✓</span>" : " &middot; <span style=\'color:var(--pending);font-weight:600\'>Submit both lists to earn $10</span>"}</div>
+              <div style="font-size:12px;color:var(--text-muted)">${doorData.active_count} active &middot; ${doorData.target_count} target${dist?.door_bonus_enabled ? (doorData.bonus_earned ? " &middot; <span style=\'color:#16a34a;font-weight:600\'>$10 bonus earned ✓</span>" : " &middot; <span style=\'color:var(--pending);font-weight:600\'>Submit both lists to earn $10</span>") : ""}</div>
             </div>
           </div>
           <i data-lucide="chevron-down" id="door-chevron" style="width:18px;height:18px;transition:transform .2s;${state.doorSectionOpen ? 'transform:rotate(180deg)' : ''}"></i>
         </div>
         <div id="door-section-body" style="display:${state.doorSectionOpen ? 'block' : 'none'}">
-          ${doorSectionBodyHTML(doorData)}
+          ${doorSectionBodyHTML(doorData, dist)}
         </div>
       </div>
 
@@ -669,6 +669,7 @@ function adminNavHTML(active) {
       <button class="admin-tab ${active === "doors" ? "active" : ""}" onclick="navigate('admin-doors')"><i data-lucide="map-pin" style="width:16px;height:16px"></i> Doors</button>
       <button class="admin-tab ${active === "funds" ? "active" : ""}" onclick="navigate('admin-funds')"><i data-lucide="landmark" style="width:16px;height:16px"></i> Funds</button>
       <button class="admin-tab ${active === "notes" ? "active" : ""}" onclick="navigate('admin-notes')"><i data-lucide="notebook-pen" style="width:16px;height:16px"></i> Notes</button>
+      <button class="admin-tab ${active === "health" ? "active" : ""}" onclick="navigate('admin-health')"><i data-lucide="activity" style="width:16px;height:16px"></i> Health</button>
       <button class="admin-tab ${active === "settings" ? "active" : ""}" onclick="navigate('admin-settings')"><i data-lucide="settings" style="width:16px;height:16px"></i> Settings</button>
     </div>`;
 }
@@ -681,6 +682,7 @@ async function renderAdminDashboard(section) {
   else if (section === "funds") await renderAdminFunds();
   else if (section === "doors") await renderAdminDoors();
   else if (section === "notes") await renderAdminNotes();
+  else if (section === "health") await renderAdminHealth();
   else if (section === "settings") await renderAdminSettings();
 }
 
@@ -827,6 +829,12 @@ async function renderAdminFunds() {
                 Invite code: <strong>${esc(d.invite_code || "—")}</strong>
                 <button class="btn btn-secondary btn-xs" onclick="editInviteCode('${d.id}','${esc(d.invite_code || "")}')">Edit</button>
               </div>
+              <div style="margin-top:var(--sp-2);display:flex;align-items:center;gap:var(--sp-2);font-size:12px;color:var(--text-muted)">
+                <label style="display:flex;align-items:center;gap:var(--sp-2);cursor:pointer">
+                  <input type="checkbox" ${d.door_bonus_enabled ? "checked" : ""} onchange="toggleDoorBonus('${d.id}', this.checked)" style="cursor:pointer">
+                  $10 door list bonus enabled
+                </label>
+              </div>
             </div>
             <button class="btn btn-primary btn-sm" onclick="openAddFundsModal('${d.id}','${esc(d.name)}',${d.current_fund_balance})">Manage Fund</button>
           </div>
@@ -863,6 +871,13 @@ window.saveInviteCode = async function(distId) {
     await api(`/api/distributors/${distId}/fund`, { method: "PUT", body: { invite_code: code } });
     showToast("Invite code updated.", "success"); renderAdminFunds();
   } catch (err) { showToast(err.message, "error"); }
+};
+
+window.toggleDoorBonus = async function(distId, enabled) {
+  try {
+    await api(`/api/distributors/${distId}/fund`, { method: "PUT", body: { door_bonus_enabled: enabled } });
+    showToast(enabled ? "Door list bonus enabled." : "Door list bonus disabled.", "success");
+  } catch (err) { showToast(err.message, "error"); renderAdminFunds(); }
 };
 
 window.openAddFundsModal = function(distId, distName, currentBalance) {
@@ -1093,7 +1108,7 @@ window.deleteBonus = async function(id) {
 state.doorSectionOpen = false;
 state.doorActiveTab = "ACTIVE";   // "ACTIVE" | "TARGET"
 
-function doorSectionBodyHTML(doorData) {
+function doorSectionBodyHTML(doorData, dist) {
   const doors = doorData.doors || [];
   const activeTab = state.doorActiveTab || "ACTIVE";
   const activeDoors = doors.filter(d => d.door_type === "ACTIVE");
@@ -1104,7 +1119,7 @@ function doorSectionBodyHTML(doorData) {
 
   return `
     <div style="padding:var(--sp-4) 0 var(--sp-2)">
-      ${!doorData.bonus_earned ? `
+      ${dist?.door_bonus_enabled && !doorData.bonus_earned ? `
       <div class="door-bonus-banner">
         <i data-lucide="gift" style="width:16px;height:16px"></i>
         <span>Submit your <strong>Active</strong> and <strong>Target</strong> door lists to earn a <strong>$10 bonus</strong> — one time, auto-approved.</span>
@@ -1748,6 +1763,65 @@ async function renderAdminNotes() {
                   </div>`).join("")}
               </div>`;
           }).join("")}`;
+
+    lucide.createIcons();
+  } catch (err) { showToast(err.message, "error"); }
+}
+
+/* ── Admin Health ─────────────────────────────────────────────── */
+async function renderAdminHealth() {
+  const content = document.getElementById("admin-content");
+  try {
+    const reps = await api("/api/stats/health");
+
+    const flagged = reps.filter(r => r.is_flagged);
+    const healthy = reps.filter(r => !r.is_flagged);
+
+    const flagLabel = f => {
+      if (f === "never_active") return `<span class="badge" style="background:#fee2e2;color:#dc2626">Never active</span>`;
+      if (f === "gone_quiet") return `<span class="badge" style="background:#fef3c7;color:#d97706">Gone quiet</span>`;
+      if (f === "no_reorders") return `<span class="badge" style="background:#ede9fe;color:#7c3aed">No reorders</span>`;
+      return "";
+    };
+
+    const repRow = r => `<tr>
+      <td><strong>${esc(r.rep_name)}</strong><br><span style="font-size:11px;color:var(--text-muted)">${esc(r.rep_email)}</span></td>
+      <td style="font-size:12px">${esc(r.distributor_name || "—")}</td>
+      <td style="text-align:center">${r.last_claim_date ? fmtDate(r.last_claim_date) : "<span style='color:var(--text-muted)'>—</span>"}</td>
+      <td style="text-align:center">${r.days_since_last_claim != null ? r.days_since_last_claim + "d" : "—"}</td>
+      <td style="text-align:center">${r.new_door_stores}</td>
+      <td style="text-align:center">${r.reorder_stores}</td>
+      <td style="text-align:center">${fmtCurrency(r.total_earned)}</td>
+      <td>${(r.flags || []).map(flagLabel).join(" ")}</td>
+    </tr>`;
+
+    content.innerHTML = `
+      <div class="section-header" style="margin-bottom:var(--sp-4)">
+        <h3>Account Health</h3>
+        <span style="font-size:13px;color:var(--text-muted)">${flagged.length} flagged &middot; ${healthy.length} healthy</span>
+      </div>
+
+      ${flagged.length > 0 ? `
+      <h4 style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:var(--sp-3)">
+        ⚠️ Needs Attention (${flagged.length})
+      </h4>
+      <div class="table-wrapper" style="margin-bottom:var(--sp-6)">
+        <table class="claims-table">
+          <thead><tr><th>Rep</th><th>Distributor</th><th>Last Claim</th><th>Days Ago</th><th>New Doors</th><th>Reorders</th><th>Earned</th><th>Flags</th></tr></thead>
+          <tbody>${flagged.map(repRow).join("")}</tbody>
+        </table>
+      </div>` : `<p style="color:#16a34a;font-weight:600;margin-bottom:var(--sp-6)">✓ All reps are active — no flags.</p>`}
+
+      ${healthy.length > 0 ? `
+      <h4 style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:var(--sp-3)">
+        Healthy Reps (${healthy.length})
+      </h4>
+      <div class="table-wrapper">
+        <table class="claims-table">
+          <thead><tr><th>Rep</th><th>Distributor</th><th>Last Claim</th><th>Days Ago</th><th>New Doors</th><th>Reorders</th><th>Earned</th><th>Flags</th></tr></thead>
+          <tbody>${healthy.map(repRow).join("")}</tbody>
+        </table>
+      </div>` : ""}`;
 
     lucide.createIcons();
   } catch (err) { showToast(err.message, "error"); }

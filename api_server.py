@@ -146,6 +146,13 @@ def init_db(db):
         db.commit()
     except Exception:
         pass
+    # Migrate: add door_bonus_enabled column (default on; Harbor starts off)
+    try:
+        db.execute("ALTER TABLE distributors ADD COLUMN door_bonus_enabled INTEGER NOT NULL DEFAULT 1")
+        db.execute("UPDATE distributors SET door_bonus_enabled = 0 WHERE name = 'Harbor Wholesale'")
+        db.commit()
+    except Exception:
+        pass
     db.commit()
 
 def seed_data(db):
@@ -469,6 +476,7 @@ class DistributorFundUpdate(BaseModel):
     add_funds: Optional[float] = None
     set_balance: Optional[float] = None
     invite_code: Optional[str] = None
+    door_bonus_enabled: Optional[bool] = None
 
 class UserCreate(BaseModel):
     email: str
@@ -757,6 +765,56 @@ def admin_stats(user=Depends(get_current_user)):
     db.close()
     return dict(stats)
 
+@app.get("/api/stats/health")
+def account_health(user=Depends(get_current_user)):
+    """Account health view — flags reps who've gone quiet or have coverage gaps."""
+    require_admin(user)
+    db = get_db()
+    rows = db.execute("""
+        SELECT
+            u.id as user_id,
+            u.name as rep_name,
+            u.email as rep_email,
+            d.name as distributor_name,
+            COUNT(CASE WHEN c.status = 'APPROVED' THEN 1 END) as total_approved,
+            COUNT(DISTINCT CASE WHEN ct.name = 'NEW_DOOR' AND c.status = 'APPROVED' THEN c.store_name END) as new_door_stores,
+            COUNT(DISTINCT CASE WHEN ct.name = 'REORDER' AND c.status = 'APPROVED' THEN c.store_name END) as reorder_stores,
+            SUM(CASE WHEN c.status = 'APPROVED' THEN c.payout_amount ELSE 0 END) as total_earned,
+            MAX(c.order_date) as last_claim_date,
+            CAST(julianday('now') - julianday(MAX(c.order_date)) AS INTEGER) as days_since_last_claim
+        FROM users u
+        LEFT JOIN claims c ON u.id = c.user_id
+        LEFT JOIN claim_types ct ON c.claim_type_id = ct.id
+        LEFT JOIN distributors d ON u.distributor_id = d.id
+        WHERE u.role = 'rep'
+        GROUP BY u.id, u.name, u.email, d.name
+        ORDER BY last_claim_date ASC
+    """).fetchall()
+    db.close()
+
+    result = []
+    for r in rows:
+        days = r["days_since_last_claim"]
+        new_doors = r["new_door_stores"] or 0
+        reorders = r["reorder_stores"] or 0
+        total = r["total_approved"] or 0
+
+        flags = []
+        if r["last_claim_date"] is None:
+            flags.append("never_active")
+        elif days is not None and days >= 14:
+            flags.append("gone_quiet")
+        if new_doors > 0 and reorders == 0:
+            flags.append("no_reorders")
+
+        result.append({
+            **dict(r),
+            "flags": flags,
+            "is_flagged": len(flags) > 0,
+        })
+
+    return result
+
 # ── Claim Types ────────────────────────────────────────────────────
 @app.get("/api/claim-types")
 def list_claim_types(user=Depends(get_current_user)):
@@ -980,6 +1038,11 @@ def update_distributor_fund(dist_id: str, req: DistributorFundUpdate, user=Depen
         except Exception:
             db.close()
             raise HTTPException(status_code=400, detail="Invite code already in use by another distributor.")
+    if req.door_bonus_enabled is not None:
+        db.execute(
+            "UPDATE distributors SET door_bonus_enabled = ?, updated_at = datetime('now') WHERE id = ?",
+            (1 if req.door_bonus_enabled else 0, dist_id)
+        )
     db.commit()
     result = db.execute("SELECT * FROM distributors WHERE id = ?", (dist_id,)).fetchone()
     db.close()
@@ -1355,6 +1418,11 @@ class DoorVerifyRequest(BaseModel):
 
 def _check_and_award_door_bonus(db, user_id: str, distributor_id: str):
     """Award $10 bonus once both ACTIVE and TARGET lists have ≥1 door. Idempotent."""
+    # Check if door bonus is enabled for this distributor
+    dist_flag = db.execute("SELECT door_bonus_enabled FROM distributors WHERE id = ?", (distributor_id,)).fetchone()
+    if not dist_flag or not dist_flag["door_bonus_enabled"]:
+        return None  # Door bonus disabled for this distributor
+
     already = db.execute("SELECT id FROM rep_door_bonus WHERE user_id = ?", (user_id,)).fetchone()
     if already:
         return None  # Already awarded
